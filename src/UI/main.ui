@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>500</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QGridLayout" name="glCent">
+    <item row="0" column="0" colspan="2">
+     <widget class="QLabel" name="lbDst">
+      <property name="text">
+       <string>저장 위치:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="2">
+     <widget class="QPushButton" name="btnChangeDst">
+      <property name="text">
+       <string>선택</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="0" colspan="3">
+     <widget class="QGroupBox" name="gbFile">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="title">
+       <string>파일 정보</string>
+      </property>
+      <layout class="QGridLayout" name="glFile">
+       <item row="1" column="0">
+        <widget class="QPushButton" name="btnSelect">
+         <property name="text">
+          <string>전체 선택</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QPushButton" name="btnInverse">
+         <property name="text">
+          <string>선택 반전</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="2">
+        <spacer name="sp">
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>198</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="1" column="3">
+        <widget class="QPushButton" name="btnDownload">
+         <property name="text">
+          <string>선택 다운로드</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="0" colspan="4">
+        <widget class="QTreeWidget" name="treeFile">
+         <column>
+          <property name="text">
+           <string>선택</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>No.</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>자료명</string>
+          </property>
+         </column>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item row="2" column="0">
+     <widget class="QGroupBox" name="gbLogin">
+      <property name="title">
+       <string>로그인 상태: 로그아웃됨</string>
+      </property>
+      <layout class="QGridLayout" name="glLogin">
+       <item row="0" column="0">
+        <widget class="QLabel" name="lbUser">
+         <property name="text">
+          <string>LMS 사용자명</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLineEdit" name="lnUser"/>
+       </item>
+       <item row="0" column="2">
+        <widget class="QLabel" name="lbPass">
+         <property name="text">
+          <string>LMS 비밀번호</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="3" colspan="2">
+        <widget class="QLineEdit" name="lnPass"/>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="lbId">
+         <property name="text">
+          <string>학번</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1" colspan="3">
+        <widget class="QLineEdit" name="lnId"/>
+       </item>
+       <item row="1" column="4">
+        <widget class="QPushButton" name="btnLogin">
+         <property name="text">
+          <string>로그인</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item row="2" column="1" colspan="2">
+     <widget class="QGroupBox" name="gbSubject">
+      <property name="title">
+       <string>과목명: 설정 안 됨</string>
+      </property>
+      <layout class="QGridLayout" name="glSubject">
+       <item row="1" column="1" colspan="3">
+        <widget class="QComboBox" name="cbSubject"/>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="lbSubject">
+         <property name="text">
+          <string>과목명</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="0">
+        <widget class="QLabel" name="lbYear">
+         <property name="text">
+          <string>학년도</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QSpinBox" name="spinYear">
+         <property name="suffix">
+          <string>년</string>
+         </property>
+         <property name="minimum">
+          <number>2010</number>
+         </property>
+         <property name="maximum">
+          <number>2099</number>
+         </property>
+         <property name="value">
+          <number>2021</number>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="2">
+        <widget class="QLabel" name="lbSemester">
+         <property name="text">
+          <string>학기</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="4">
+        <widget class="QPushButton" name="btnSet">
+         <property name="text">
+          <string>설정</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="3" colspan="2">
+        <widget class="QComboBox" name="cbSemester">
+         <item>
+          <property name="text">
+           <string>1학기</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>2학기</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>여름계절</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>겨울계절</string>
+          </property>
+         </item>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

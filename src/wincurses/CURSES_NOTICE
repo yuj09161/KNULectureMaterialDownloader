@@ -1,0 +1,3 @@
+If you need to use curses in windows,
+you must download, unzip wheel and copy windows-curses
+(https://pypi.org/project/windows-curses).
