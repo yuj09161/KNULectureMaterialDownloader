@@ -162,6 +162,48 @@ class CheckModel(BaseModel):
 # end base models
 
 
+class HelloLMSSubjectsModel(QStandardItemModel):
+    def __init__(self):
+        super().__init__()
+        self.__subject_codes = []
+
+    def set_subjects(self, subj_info: Union[list, tuple]):
+        for subj in subj_info:
+            self.add_data(*subj)
+
+    def add_data(self, subject_name: str, subject_code: str):
+        super().appendRow(QStandardItem(subject_name))
+        self.__subject_codes.append(subject_code)
+
+    def get_current_code(self, index: int):
+        return self.__subject_codes[index]
+
+    def clear(self):
+        super().clear()
+        self.__subject_codes = []
+
+
+class CanvasSubjectsModel(QStandardItemModel):
+    def __init__(self):
+        super().__init__()
+        self.__subject_urls = []
+
+    def set_subjects(self, subj_info: Union[list, tuple]):
+        for subj in subj_info:
+            self.add_data(*subj)
+
+    def add_data(self, subject_name: str, subject_url: str):
+        super().appendRow(QStandardItem(subject_name))
+        self.__subject_urls.append(subject_url)
+
+    def get_current_url(self, index: int):
+        return self.__subject_urls[index]
+
+    def clear(self):
+        super().clear()
+        self.__subject_urls = []
+
+
 class Files(CheckModel):
     def __init__(self):
         self._header = ('No.', '파일명', '상태')

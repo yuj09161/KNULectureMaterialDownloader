@@ -1,11 +1,11 @@
 # pylint: disable = line-too-long
 
-from PySide6.QtCore import Qt, QCoreApplication
+from PySide6.QtCore import Qt, QCoreApplication, Signal
 # from PySide6.QtGui import
 from PySide6.QtWidgets import (
     QWidget, QGroupBox,
-    QGridLayout,
-    QLineEdit, QComboBox, QSpinBox, QPushButton,
+    QGridLayout, QHBoxLayout,
+    QLineEdit, QComboBox, QSpinBox, QPushButton, QRadioButton,
     QLabel, QTreeView, QStatusBar, QProgressBar,
     QSpacerItem, QSizePolicy
 )
@@ -18,6 +18,27 @@ sizePolicy_PE.setVerticalStretch(0)
 sizePolicy_FF = QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 sizePolicy_FF.setHorizontalStretch(0)
 sizePolicy_FF.setVerticalStretch(0)
+
+sizePolicy_MF = QSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+sizePolicy_MF.setHorizontalStretch(0)
+sizePolicy_MF.setVerticalStretch(0)
+
+sizePolicy_EF = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+sizePolicy_EF.setHorizontalStretch(0)
+sizePolicy_EF.setVerticalStretch(0)
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.setStyleSheet('color: blue; text-decoration: underline;')
+
+    def mousePressEvent(self, event):
+        event.accept()
+        self.clicked.emit()
 
 
 class Ui_MainWin(object):
@@ -32,21 +53,41 @@ class Ui_MainWin(object):
         self.glCent = QGridLayout(self.centralwidget)
         self.glCent.setObjectName(u"glCent")
 
-        self.lbDst = QLabel(self.centralwidget)
-        self.lbDst.setObjectName(u"lbDst")
-        self.glCent.addWidget(self.lbDst, 0, 0, 1, 2)
+        # Sources group box
+        self.gbSources = QGroupBox(self.centralwidget)
+        self.hlSources = QHBoxLayout(self.gbSources)
 
-        self.btnOpenDst = QPushButton(self.centralwidget)
-        self.btnOpenDst.setObjectName(u"btnOpenDst")
-        sizePolicy_FF.setHeightForWidth(self.btnOpenDst.sizePolicy().hasHeightForWidth())
-        self.btnOpenDst.setSizePolicy(sizePolicy_FF)
-        self.glCent.addWidget(self.btnOpenDst, 0, 2, 1, 1)
+        self.rbHellolms = QRadioButton(self.gbSources)
+        self.hlSources.addWidget(self.rbHellolms)
+
+        self.rbCanvasFirefox = QRadioButton(self.gbSources)
+        self.hlSources.addWidget(self.rbCanvasFirefox)
+
+        self.rbCanvasChrome = QRadioButton(self.gbSources)
+        self.hlSources.addWidget(self.rbCanvasChrome)
+
+        self.glCent.addWidget(self.gbSources, 0, 0, 1, 1)
+        # end sources
+
+        self.lbTitleDst = QLabel(self.centralwidget)
+        self.lbTitleDst.setObjectName(u"lbTitleDst")
+        sizePolicy_MF.setHeightForWidth(self.lbTitleDst.hasHeightForWidth())
+        self.lbTitleDst.setSizePolicy(sizePolicy_MF)
+        self.lbTitleDst.setAlignment(Qt.AlignCenter)
+        self.glCent.addWidget(self.lbTitleDst, 0, 1, 1, 1)
+
+        self.lbDst = ClickableLabel(self.centralwidget)
+        self.lbDst.setObjectName(u"lbDst")
+        sizePolicy_EF.setHeightForWidth(self.lbDst.sizePolicy().hasHeightForWidth())
+        self.lbDst.setSizePolicy(sizePolicy_EF)
+        self.lbDst.setAlignment(Qt.AlignCenter)
+        self.glCent.addWidget(self.lbDst, 0, 2, 1, 2)
 
         self.btnSetDst = QPushButton(self.centralwidget)
         self.btnSetDst.setObjectName(u"btnSetDst")
         sizePolicy_FF.setHeightForWidth(self.btnSetDst.sizePolicy().hasHeightForWidth())
         self.btnSetDst.setSizePolicy(sizePolicy_FF)
-        self.glCent.addWidget(self.btnSetDst, 0, 3, 1, 1)
+        self.glCent.addWidget(self.btnSetDst, 0, 4, 1, 1)
 
         # Files group box
         self.gbFile = QGroupBox(self.centralwidget)
@@ -75,7 +116,7 @@ class Ui_MainWin(object):
         self.tvFile.setObjectName(u"tvFile")
         self.glFile.addWidget(self.tvFile, 0, 0, 1, 4)
 
-        self.glCent.addWidget(self.gbFile, 1, 0, 1, 4)
+        self.glCent.addWidget(self.gbFile, 1, 0, 1, 5)
         # end files
 
         # Login group box
@@ -117,7 +158,7 @@ class Ui_MainWin(object):
         self.btnLogin.setObjectName(u"btnLogin")
         self.glLogin.addWidget(self.btnLogin, 1, 4, 1, 1)
 
-        self.glCent.addWidget(self.gbLogin, 2, 0, 1, 1)
+        self.glCent.addWidget(self.gbLogin, 2, 0, 1, 3)
         # end login
 
         # Semester & subject group box
@@ -161,7 +202,7 @@ class Ui_MainWin(object):
         self.btnSetSubj.setObjectName(u"btnSetSubj")
         self.glSubject.addWidget(self.btnSetSubj, 1, 4, 1, 1)
 
-        self.glCent.addWidget(self.gbSubject, 2, 1, 1, 3)
+        self.glCent.addWidget(self.gbSubject, 2, 3, 1, 2)
         # end semester & subject
 
         MainWindow.setCentralWidget(self.centralwidget)
@@ -182,8 +223,12 @@ class Ui_MainWin(object):
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"LMS \uac15\uc758\uc790\ub8cc \ub2e4\uc6b4\ub85c\ub354", None))
 
-        self.lbDst.setText(QCoreApplication.translate("MainWindow", u"\uc800\uc7a5 \uc704\uce58:", None))
-        self.btnOpenDst.setText(QCoreApplication.translate("MainWindow", u"\uc5f4\uae30", None))
+        self.gbSources.setTitle(u"\uc704\uce58 \uc120\ud0dd")
+        self.rbHellolms.setText(u"HelloLMS")
+        self.rbCanvasFirefox.setText(u"Canvas (Firefox)")
+        self.rbCanvasChrome.setText(u"Canvas (Chrome)")
+
+        self.lbTitleDst.setText(QCoreApplication.translate("MainWindow", u"\uc800\uc7a5 \uc704\uce58", None))
         self.btnSetDst.setText(QCoreApplication.translate("MainWindow", u"\ubcc0\uacbd", None))
 
         self.gbFile.setTitle(QCoreApplication.translate("MainWindow", u"\ud30c\uc77c \uc815\ubcf4", None))

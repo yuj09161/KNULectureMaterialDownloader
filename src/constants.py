@@ -39,3 +39,5 @@ else:
 PROGRAM_DIR += PATHSEP
 
 # project specific constants
+CANVAS_URL = 'https://canvas.knu.ac.kr'
+SUBJECT_URL = 'https://canvas.knu.ac.kr/courses'
