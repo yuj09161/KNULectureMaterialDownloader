@@ -125,21 +125,21 @@ class Ui_MainWin(object):
         self.lbUser = QLabel(self.gbLogin)
         self.lbUser.setObjectName(u"lbUser")
         self.lbUser.setAlignment(Qt.AlignCenter)
-        self.glLogin.addWidget(self.lbUser, 0, 0, 1, 1)
+        self.glLogin.addWidget(self.lbUser, 0, 0, 1, 2)
 
         self.lnUser = QLineEdit(self.gbLogin)
         self.lnUser.setObjectName(u"lnUser")
-        self.glLogin.addWidget(self.lnUser, 0, 1, 1, 1)
+        self.glLogin.addWidget(self.lnUser, 0, 2, 1, 1)
 
         self.lbPass = QLabel(self.gbLogin)
         self.lbPass.setObjectName(u"lbPass")
         self.lbPass.setAlignment(Qt.AlignCenter)
-        self.glLogin.addWidget(self.lbPass, 0, 2, 1, 1)
+        self.glLogin.addWidget(self.lbPass, 0, 3, 1, 1)
 
         self.lnPass = QLineEdit(self.gbLogin)
         self.lnPass.setObjectName(u"lnPass")
         self.lnPass.setEchoMode(QLineEdit.Password)
-        self.glLogin.addWidget(self.lnPass, 0, 3, 1, 2)
+        self.glLogin.addWidget(self.lnPass, 0, 4, 1, 2)
 
         self.lbId = QLabel(self.gbLogin)
         self.lbId.setObjectName(u"lbId")
@@ -149,11 +149,11 @@ class Ui_MainWin(object):
         self.lnId = QLineEdit(self.gbLogin)
         self.lnId.setObjectName(u"lnId")
         self.lnId.setEchoMode(QLineEdit.Password)
-        self.glLogin.addWidget(self.lnId, 1, 1, 1, 3)
+        self.glLogin.addWidget(self.lnId, 1, 1, 1, 4)
 
         self.btnLogin = QPushButton(self.gbLogin)
         self.btnLogin.setObjectName(u"btnLogin")
-        self.glLogin.addWidget(self.btnLogin, 1, 4, 1, 1)
+        self.glLogin.addWidget(self.btnLogin, 1, 5, 1, 1)
 
         self.glCent.addWidget(self.gbLogin, 2, 0, 1, 3)
         # end login
@@ -172,7 +172,6 @@ class Ui_MainWin(object):
         self.spinYear.setObjectName(u"spinYear")
         self.spinYear.setMinimum(2010)
         self.spinYear.setMaximum(2099)
-        self.spinYear.setValue(2021)
         self.glSubject.addWidget(self.spinYear, 0, 1, 1, 1)
 
         self.lbSemester = QLabel(self.gbSubject)
@@ -220,7 +219,7 @@ class Ui_MainWin(object):
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"LMS \uac15\uc758\uc790\ub8cc \ub2e4\uc6b4\ub85c\ub354", None))
 
-        self.gbSources.setTitle(u"\uc704\uce58 \uc120\ud0dd")
+        self.gbSources.setTitle(u"LMS \uc120\ud0dd")
         self.rbHellolms.setText(u"HelloLMS")
         self.rbCanvas.setText(u"Canvas")
 

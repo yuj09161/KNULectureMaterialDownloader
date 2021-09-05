@@ -15,7 +15,7 @@ import requests
 
 from UI import Ui_MainWin
 from constants import (
-    USER_DIR, PATHSEP,
+    USER_DIR, DATADIR, PATHSEP,
     IS_WINDOWS, IS_LINUX, IS_MACOS
 )
 from models import Files, HelloLMSSubjectsModel, CanvasSubjectsModel
@@ -60,6 +60,9 @@ class _DownloadSource(Enum):
 
 
 class MainWin(QMainWindow, Ui_MainWin):
+    __CFG_DIR = DATADIR + 'hys.LectureMaterialDownloader/'
+    __CFG_FILE = __CFG_DIR + 'config'
+
     def __init__(self):
         super().__init__()
         self.setupUi(self)
@@ -67,10 +70,10 @@ class MainWin(QMainWindow, Ui_MainWin):
         self.__files = Files()
         self.__hellolms_subjects = HelloLMSSubjectsModel()
         self.__canvas_subjects = CanvasSubjectsModel()
-        self.__session = requests.Session()
 
         self.__dst = USER_DIR
         self.__download_source = None
+        self.__session = requests.Session()
 
         # common worker
         self.__file_downloader = FileDownloader(self)
@@ -85,7 +88,6 @@ class MainWin(QMainWindow, Ui_MainWin):
         self.__canvas_subject_getter = CanvasSubjectGetter(self)
         self.__canvas_fileinfo_worker = CanvasFileinfoGetter(self)
 
-        self.lbDst.setText(self.__dst[:-1])
         self.tvFile.setModel(self.__files)
 
         self.cbSemester.currentIndexChanged.connect(self.__after_smst_change)
@@ -107,11 +109,8 @@ class MainWin(QMainWindow, Ui_MainWin):
 
         self.__switch_to_hellolms()
         self.__guess_semester()
+        self.__load_config()
 
-        # set enabled state
-        self.__set_download_enabled(False)
-        self.__set_smst_enabled(False)
-        self.__set_subj_enabled(False)
         self.rbHellolms.setChecked(True)
 
     # Display related functions
@@ -176,7 +175,6 @@ class MainWin(QMainWindow, Ui_MainWin):
     def __start_work(self, msg: str):
         self.__set_sourcerb_enabled(False)
         self.__set_download_enabled(False)
-        self.__set_login_lineedit_enabled(False)
         self.__set_smst_enabled(False)
         self.__set_subj_enabled(False)
         self.btnLogin.setEnabled(False)
@@ -190,7 +188,6 @@ class MainWin(QMainWindow, Ui_MainWin):
 
         self.__set_sourcerb_enabled(True)
         self.__set_download_enabled(True)
-        self.__set_login_lineedit_enabled(True)
         self.__set_smst_enabled(True)
         self.__set_subj_enabled(True)
         self.btnLogin.setEnabled(True)
@@ -207,7 +204,10 @@ class MainWin(QMainWindow, Ui_MainWin):
     # Source setting related functions
     def __switch_to_hellolms(self):
         if self.__download_source != _DownloadSource.HelloLMS:
+            self.lbUser.setText('LMS 사용자명')
+            self.lbPass.setText('LMS 비밀번호')
             self.lbId.setText('학번')
+
             self.cbSubject.setModel(self.__hellolms_subjects)
             self.lnId.returnPressed.connect(self.__login)
             self.lnId.setEnabled(True)
@@ -220,7 +220,10 @@ class MainWin(QMainWindow, Ui_MainWin):
 
     def __switch_to_canvas(self):
         if self.__download_source != _DownloadSource.Canvas:
-            self.lbId.setText('Canvas Access Token')
+            self.lbUser.setText(f"{'-':^11}")
+            self.lbPass.setText(f"{'-':^11}")
+            self.lbId.setText('Access Token')
+
             self.cbSubject.setModel(self.__canvas_subjects)
             self.lnId.setEnabled(False)
             try:
@@ -458,7 +461,29 @@ class MainWin(QMainWindow, Ui_MainWin):
             QMessageBox.information(
                 self, '알림', '선택된 파일이 없음'
             )
-        # end Common workers
+
+    # def __load_default_config(self):
+
+    def __load_config(self):
+        if os.path.isfile(self.__CFG_FILE):
+            with open(self.__CFG_FILE, 'r', encoding='utf-8') as file:
+                self.__dst = file.read()
+        # else:
+        # self.__load_default_config()
+
+        self.lbDst.setText(self.__dst[:-1])
+
+    def __save_config(self):
+        if not os.path.isdir(self.__CFG_DIR):
+            os.makedirs(self.__CFG_DIR)
+
+        with open(self.__CFG_FILE, 'w', encoding='utf-8') as file:
+            file.write(self.__dst)
+
+    def closeEvent(self, event):
+        self.__save_config()
+        event.accept()
+    # end Common workers
 
 
 def main():
