@@ -186,22 +186,22 @@ class HelloLMSSubjectsModel(QStandardItemModel):
 class CanvasSubjectsModel(QStandardItemModel):
     def __init__(self):
         super().__init__()
-        self.__subject_urls = []
+        self.__course_ids = []
 
     def set_subjects(self, subj_info: Union[list, tuple]):
         for subj in subj_info:
             self.add_data(*subj)
 
-    def add_data(self, subject_name: str, subject_url: str):
+    def add_data(self, subject_name: str, course_id: str):
         super().appendRow(QStandardItem(subject_name))
-        self.__subject_urls.append(subject_url)
+        self.__course_ids.append(course_id)
 
-    def get_current_url(self, index: int):
-        return self.__subject_urls[index]
+    def get_current_id(self, index: int):
+        return self.__course_ids[index]
 
     def clear(self):
         super().clear()
-        self.__subject_urls = []
+        self.__course_ids = []
 
 
 class Files(CheckModel):

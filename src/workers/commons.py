@@ -20,11 +20,11 @@ class BaseRunner(QThread):
     def __init__(self, parent, runner_cnt=0, runner=None):
         super().__init__(parent)
 
-        self.runner_cnt = (
+        self._runner_cnt = (
             runner_cnt if runner_cnt else min(CPU_CNT * 2, 16)
         )
         if runner:
-            self._workers = [runner(self) for _ in range(self.runner_cnt)]
+            self._workers = [runner(self) for _ in range(self._runner_cnt)]
 
     def start(self, *args, **kwargs):
         # pylint: disable=attribute-defined-outside-init

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 import os
+import datetime
 import subprocess
 from typing import Union
 from enum import Enum, auto
@@ -15,8 +16,7 @@ import requests
 from UI import Ui_MainWin
 from constants import (
     USER_DIR, PATHSEP,
-    IS_WINDOWS, IS_LINUX, IS_MACOS,
-    CANVAS_URL, SUBJECT_URL
+    IS_WINDOWS, IS_LINUX, IS_MACOS
 )
 from models import Files, HelloLMSSubjectsModel, CanvasSubjectsModel
 from workers.commons import FileDownloader
@@ -27,8 +27,6 @@ from workers.hellolms import (
     FileinfoGetter as HelloFileinfoGetter
 )
 from workers.canvas import (
-    FirefoxStarter, ChromeStarter, WebdriverQuitter,
-    LoginWorker as CanvasLoginWorker,
     SubjectGetter as CanvasSubjectGetter,
     FileinfoGetter as CanvasFileinfoGetter
 )
@@ -58,11 +56,7 @@ def open_explorer(path):
 
 class _DownloadSource(Enum):
     HelloLMS = auto()
-    CanvasFirefox = auto()
-    CanvasChrome = auto()
-
-
-_Canvas = {_DownloadSource.CanvasFirefox, _DownloadSource.CanvasChrome}
+    Canvas = auto()
 
 
 class MainWin(QMainWindow, Ui_MainWin):
@@ -77,9 +71,6 @@ class MainWin(QMainWindow, Ui_MainWin):
 
         self.__dst = USER_DIR
         self.__download_source = None
-        self.__webdriver = None
-        self.__webdriver_wait = None
-        self.__cleaning_driver = False
 
         # common worker
         self.__file_downloader = FileDownloader(self)
@@ -91,10 +82,6 @@ class MainWin(QMainWindow, Ui_MainWin):
         self.__hello_fileinfo_worker = HelloFileinfoGetter(self)
 
         # canvas lms worker
-        self.__webdriver_quitter = WebdriverQuitter(self)
-        self.__firefox_starter = FirefoxStarter(self)
-        self.__chrome_starter = ChromeStarter(self)
-        self.__canvas_login_worker = CanvasLoginWorker(self)
         self.__canvas_subject_getter = CanvasSubjectGetter(self)
         self.__canvas_fileinfo_worker = CanvasFileinfoGetter(self)
 
@@ -105,8 +92,7 @@ class MainWin(QMainWindow, Ui_MainWin):
         self.cbSubject.currentIndexChanged.connect(self.__after_subj_change)
 
         self.rbHellolms.clicked.connect(self.__switch_to_hellolms)
-        self.rbCanvasFirefox.clicked.connect(self.__switch_to_canvas_f)
-        self.rbCanvasChrome.clicked.connect(self.__switch_to_canvas_c)
+        self.rbCanvas.clicked.connect(self.__switch_to_canvas)
 
         self.tvFile.clicked.connect(self.__set_btnSelect_text)
 
@@ -120,6 +106,7 @@ class MainWin(QMainWindow, Ui_MainWin):
         self.btnSetSubj.clicked.connect(self.__set_subject)
 
         self.__switch_to_hellolms()
+        self.__guess_semester()
 
         # set enabled state
         self.__set_download_enabled(False)
@@ -128,10 +115,14 @@ class MainWin(QMainWindow, Ui_MainWin):
         self.rbHellolms.setChecked(True)
 
     # Display related functions
+    def __guess_semester(self):
+        today = datetime.date.today()
+        self.spinYear.setValue(today.year)
+        self.cbSemester.setCurrentIndex(2 * (today.month > 7))
+
     def __set_sourcerb_enabled(self, state: bool):
         self.rbHellolms.setEnabled(state)
-        self.rbCanvasFirefox.setEnabled(state)
-        self.rbCanvasChrome.setEnabled(state)
+        self.rbCanvas.setEnabled(state)
 
     def __set_download_enabled(self, state: bool):
         self.btnSelect.setEnabled(state)
@@ -148,11 +139,11 @@ class MainWin(QMainWindow, Ui_MainWin):
         self.btnSetSubj.setEnabled(state)
 
     def __set_login_lineedit_enabled(self, state: bool):
-        self.lnUser.setEnabled(state)
-        self.lnPass.setEnabled(state)
-        self.lnId.setEnabled(
+        enable_user = \
             state and self.__download_source == _DownloadSource.HelloLMS
-        )
+        self.lnUser.setEnabled(enable_user)
+        self.lnPass.setEnabled(enable_user)
+        self.lnId.setEnabled(state)
 
     def __set_login_state(self, state: bool):
         self.__files.clear()
@@ -214,23 +205,9 @@ class MainWin(QMainWindow, Ui_MainWin):
     # end display
 
     # Source setting related functions
-    def __cleanup_driver(self, callback):
-        if self.__webdriver is not None:
-            def end():
-                self.__webdriver = None
-                self.__cleaning_driver = False
-                callback()
-
-            if self.__cleaning_driver:
-                QMessageBox.warning(self, '경고', '이미 웹 드라이버를 종료하는 중입니다')
-            else:
-                self.__cleaning_driver = True
-                self.__webdriver_quitter.start(self.__webdriver, end=end)
-        else:
-            callback()
-
     def __switch_to_hellolms(self):
-        def callback():
+        if self.__download_source != _DownloadSource.HelloLMS:
+            self.lbId.setText('학번')
             self.cbSubject.setModel(self.__hellolms_subjects)
             self.lnId.returnPressed.connect(self.__login)
             self.lnId.setEnabled(True)
@@ -239,16 +216,11 @@ class MainWin(QMainWindow, Ui_MainWin):
             except RuntimeError:
                 pass
             self.__download_source = _DownloadSource.HelloLMS
-
-            self.__end_work()
             self.__set_login_state(False)
 
-        if self.__download_source != _DownloadSource.HelloLMS:
-            self.__start_work('HelloLMS로 전환 중...')
-            self.__cleanup_driver(callback)
-
-    def __switch_to_canvas_b(self, after_callback):
-        def callback():
+    def __switch_to_canvas(self):
+        if self.__download_source != _DownloadSource.Canvas:
+            self.lbId.setText('Canvas Access Token')
             self.cbSubject.setModel(self.__canvas_subjects)
             self.lnId.setEnabled(False)
             try:
@@ -256,35 +228,8 @@ class MainWin(QMainWindow, Ui_MainWin):
             except RuntimeError:
                 pass
             self.lnPass.returnPressed.connect(self.__login)
-            after_callback()
-
-        self.__cleanup_driver(callback)
-
-    def __switch_to_canvas_f(self):
-        def end(driver_and_wait):
-            self.__webdriver, self.__webdriver_wait = driver_and_wait
-            self.__download_source = _DownloadSource.CanvasFirefox
-            self.__end_work()
+            self.__download_source = _DownloadSource.Canvas
             self.__set_login_state(False)
-
-        if self.__download_source != _DownloadSource.CanvasFirefox:
-            self.__start_work('Firefox 시작 중...')
-            self.__switch_to_canvas_b(
-                lambda: self.__firefox_starter.start(end=end)
-            )
-
-    def __switch_to_canvas_c(self):
-        def end(driver_and_wait):
-            self.__webdriver, self.__webdriver_wait = driver_and_wait
-            self.__download_source = _DownloadSource.CanvasChrome
-            self.__end_work()
-            self.__set_login_state(False)
-
-        if self.__download_source != _DownloadSource.CanvasChrome:
-            self.__start_work('Chrome/Chromium 시작 중...')
-            self.__switch_to_canvas_b(
-                lambda: self.__chrome_starter.start(end=end)
-            )
     # end source
 
     def __set_dst(self):
@@ -402,20 +347,24 @@ class MainWin(QMainWindow, Ui_MainWin):
     def __canvas_login(self):
         def end(result):
             self.__end_work()
-            if result is None:
+            if isinstance(result, list):
                 self.__set_login_state(True)
+                self.__set_subj_enabled(True)
                 self.gbLogin.setTitle('로그인 상태: 로그인됨')
+                if not result:
+                    QMessageBox.warning(
+                        self, '과목 없음', '현재 학기에 조회된 과목 없음'
+                    )
+                else:
+                    self.__canvas_subjects.set_subjects(result)
             else:
                 self.__set_login_state(False)
-                if isinstance(result, str):
-                    QMessageBox.warning(self, '로그인 실패', result)
-                else:
-                    QMessageBox.warning(self, '로그인 실패', '알 수 없는 오류')
+                QMessageBox.warning(self, '과목 조회 실패', result)
 
-        self.__start_work('로그인 중')
-        self.__canvas_login_worker.start(
-            self.__webdriver, self.__webdriver_wait,
-            CANVAS_URL, self.lnUser.text(), self.lnPass.text(),
+        self.__start_work('로그인 정보 확인(과목 조회) 중')
+        self.__canvas_subject_getter.start(
+            f'{self.spinYear.value()}년', self.cbSemester.currentText(),
+            self.lnId.text(),
             end=end
         )
 
@@ -424,18 +373,18 @@ class MainWin(QMainWindow, Ui_MainWin):
             if isinstance(result, list):
                 if not result:
                     QMessageBox.warning(
-                        self, '과목 없음', '해당 학기에 조회된 과목이 없음'
+                        self, '과목 없음', '해당 학기에 조회된 과목 없음'
                     )
                 else:
                     self.__canvas_subjects.set_subjects(result)
-            elif isinstance(result, str):
+            else:
                 QMessageBox.warning(self, '과목 조회 실패', result)
             self.__end_work()
 
         self.__start_work('과목 조회 중')
         self.__canvas_subject_getter.start(
-            self.__webdriver, self.__webdriver_wait, SUBJECT_URL,
-            self.spinYear.value(), self.cbSemester.currentText(),
+            f'{self.spinYear.value()}년', self.cbSemester.currentText(),
+            self.lnId.text(),
             end=end
         )
 
@@ -449,19 +398,17 @@ class MainWin(QMainWindow, Ui_MainWin):
                         self, '강의자료 없음', '해당 과목의 강의자료 없음'
                     )
                 else:
-                    pass
-            elif isinstance(result, str):
+                    for data in result:
+                        self.__files.add_data(*data)
+                    for k in range(self.__files.columnCount()):
+                        self.tvFile.resizeColumnToContents(k)
+            else:
                 self.__set_download_enabled(False)
                 QMessageBox.warning(self, '파일 가져오기 실패', result)
-            else:
-                QMessageBox.warning(
-                    self, '파일 가져오기 실패', '알 수 없는 오류'
-                )
 
         self.__start_work('강의자료 목록 가져오는 중')
         self.__canvas_fileinfo_worker.start(
-            self.__webdriver, self.__webdriver_wait,
-            self.__canvas_subjects.get_current_url(
+            self.lnId.text(), self.__canvas_subjects.get_current_id(
                 self.cbSubject.currentIndex()
             ), end=end
         )
@@ -471,7 +418,7 @@ class MainWin(QMainWindow, Ui_MainWin):
     def __login(self):
         if self.__download_source == _DownloadSource.HelloLMS:
             self.__hello_login()
-        elif self.__download_source in _Canvas:
+        elif self.__download_source == _DownloadSource.Canvas:
             self.__canvas_login()
         else:
             raise ValueError(f'Invalid source: {self.__download_source}')
@@ -479,7 +426,7 @@ class MainWin(QMainWindow, Ui_MainWin):
     def __get_subject(self):
         if self.__download_source == _DownloadSource.HelloLMS:
             self.__hello_get_subject()
-        elif self.__download_source in _Canvas:
+        elif self.__download_source == _DownloadSource.Canvas:
             self.__canvas_get_subject()
         else:
             raise ValueError(f'Invalid source: {self.__download_source}')
@@ -487,7 +434,7 @@ class MainWin(QMainWindow, Ui_MainWin):
     def __set_subject(self):
         if self.__download_source == _DownloadSource.HelloLMS:
             self.__hello_set_subject()
-        elif self.__download_source in _Canvas:
+        elif self.__download_source == _DownloadSource.Canvas:
             self.__canvas_get_info_of_files()
         else:
             raise ValueError(f'Invalid source: {self.__download_source}')
@@ -512,13 +459,6 @@ class MainWin(QMainWindow, Ui_MainWin):
                 self, '알림', '선택된 파일이 없음'
             )
         # end Common workers
-
-    def closeEvent(self, event):
-        if self.__webdriver is None:
-            event.accept()
-        else:
-            event.ignore()
-            self.__cleanup_driver(self.close)
 
 
 def main():

@@ -1,4 +1,4 @@
-# pylint: disable = line-too-long
+# pylint: disable = line-too-long, redundant-u-string-prefix
 
 from PySide6.QtCore import Qt, QCoreApplication, Signal
 # from PySide6.QtGui import
@@ -60,11 +60,8 @@ class Ui_MainWin(object):
         self.rbHellolms = QRadioButton(self.gbSources)
         self.hlSources.addWidget(self.rbHellolms)
 
-        self.rbCanvasFirefox = QRadioButton(self.gbSources)
-        self.hlSources.addWidget(self.rbCanvasFirefox)
-
-        self.rbCanvasChrome = QRadioButton(self.gbSources)
-        self.hlSources.addWidget(self.rbCanvasChrome)
+        self.rbCanvas = QRadioButton(self.gbSources)
+        self.hlSources.addWidget(self.rbCanvas)
 
         self.glCent.addWidget(self.gbSources, 0, 0, 1, 1)
         # end sources
@@ -225,8 +222,7 @@ class Ui_MainWin(object):
 
         self.gbSources.setTitle(u"\uc704\uce58 \uc120\ud0dd")
         self.rbHellolms.setText(u"HelloLMS")
-        self.rbCanvasFirefox.setText(u"Canvas (Firefox)")
-        self.rbCanvasChrome.setText(u"Canvas (Chrome)")
+        self.rbCanvas.setText(u"Canvas")
 
         self.lbTitleDst.setText(QCoreApplication.translate("MainWindow", u"\uc800\uc7a5 \uc704\uce58", None))
         self.btnSetDst.setText(QCoreApplication.translate("MainWindow", u"\ubcc0\uacbd", None))
