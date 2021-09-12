@@ -104,7 +104,10 @@ class FileinfoGetter(BaseRunner):
 
         content_parser = bs(content_response.text, 'html.parser')
         return [
-            (tag.text.strip('- '), LMS_URL_BASE + tag['href'])
+            (
+                re.search(r'[- ]*(.+) \([0-9.]+[A-Z]?B\)', tag.text)[1],
+                LMS_URL_BASE + tag['href']
+            )
             for tag in content_parser.find_all('a', {'class': 'site-link'})
             if tag.text.strip() not in EXCLUDE_TITLES
         ]
