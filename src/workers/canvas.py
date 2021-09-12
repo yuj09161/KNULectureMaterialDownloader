@@ -1,3 +1,4 @@
+import re
 import json
 import urllib.parse
 import xml.etree.ElementTree as et
@@ -115,12 +116,8 @@ class FileinfoGetter(BaseRunner):
         c_response = requests.get(
             self.__CONTENTS_TEMPLATE.format(rid)
         )
-        # breakpoint()
-        ci_url = self.__CONTENTS_BASE_URL + (
-            c_response.text
-            .split("var contentUri = '", 1)[1]
-            .split("';", 1)[0]
-        )
+        ci_url = self.__CONTENTS_BASE_URL +\
+            re.search(r"var contentUri = '(.+)';", c_response.text)[1]
         ci_response = requests.get(ci_url)
 
         # Get contents download url and extension
