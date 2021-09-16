@@ -98,16 +98,14 @@ class FileinfoGetter(ThreadRunner):
             modules_results = self.__material_extractor(
                 access_token, course_id, executor
             )
-            # Todo: resolve bug and re-enable LearningX resource
-            # resource_results = self.__resource_extractor(
-            #     access_token, course_id, executor
-            # )
+            resource_results = self.__resource_extractor(
+                access_token, course_id, executor
+            )
 
         return [
             (name, url)
             for _, name, url in sorted(reduce(
-                # add, chain(modules_results, resource_results)
-                add, modules_results
+                add, chain(modules_results, resource_results)
             ))
             if not name.startswith('Error')
         ]
@@ -224,7 +222,9 @@ class FileinfoGetter(ThreadRunner):
                 access_token, ('id=' + self.__RESOURCE_TOOL_ID,)
             )
         )
+        # print(response.json()['url'])
         response = session.get(response.json()['url'])
+        # print(response.text)
         extracted_data = {
             tag['name']: tag['value']
             for tag in bs(response.text, 'html.parser').select('form input')
@@ -233,6 +233,11 @@ class FileinfoGetter(ThreadRunner):
             'https://canvas.knu.ac.kr/learningx/lti/courseresource',
             data=extracted_data
         )
+        # print(json.dumps(extracted_data, indent=4, ensure_ascii=False))
+        # print(
+        #     session.cookies.get('xn_api_token', None), 
+        #     session.cookies, sep='\n'
+        # )
         session.headers.update({
             'Authorization': f"Bearer {session.cookies['xn_api_token']}"
         })

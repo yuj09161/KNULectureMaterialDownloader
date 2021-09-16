@@ -1,6 +1,5 @@
 from PySide6.QtCore import Signal, QThread
 
-import os
 import asyncio
 from multiprocessing import cpu_count
 
