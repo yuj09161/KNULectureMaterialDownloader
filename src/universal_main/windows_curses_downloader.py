@@ -8,7 +8,15 @@ from urllib import request
 FILE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def main():
+def download_curses(dst: str = FILE_DIR):
+    """
+    Download windows-curses package from pypi.org.
+
+    Args:
+        dst (str, optional):
+            The directory to download files.
+            Defaults to directory of this file.
+    """
     with request.urlopen(
         'https://pypi.org/project/windows-curses/#files'
     ) as req:
@@ -27,8 +35,8 @@ def main():
                 infos = zip_file.infolist()
                 for info in infos:
                     if info.filename.endswith('.pyd'):
-                        zip_file.extract(info, FILE_DIR)
+                        zip_file.extract(info, dst)
 
 
 if __name__ == '__main__':
-    main()
+    download_curses()

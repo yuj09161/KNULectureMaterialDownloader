@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 from bs4 import BeautifulSoup as bs
 
-from .commons import BaseRunner
+from pyside_commons import ThreadRunner
 
 
 CANVAS_URL = 'https://canvas.knu.ac.kr'
@@ -26,7 +26,7 @@ def _join_url_token(
     return url + '?access_token=' + access_token
 
 
-class SubjectGetter(BaseRunner):
+class SubjectGetter(ThreadRunner):
     __SUBJECT_GET_URL = CANVAS_URL + '/api/v1/courses'
 
     def runner(
@@ -62,7 +62,7 @@ class SubjectGetter(BaseRunner):
             return response.json()['errors'][0]['message']
 
 
-class FileinfoGetter(BaseRunner):
+class FileinfoGetter(ThreadRunner):
     __MODULES_URL = CANVAS_URL + '/api/v1/courses/{}/modules'
     __EXTERNAL_TOOL_URL = (
         CANVAS_URL
@@ -94,18 +94,20 @@ class FileinfoGetter(BaseRunner):
                 Return this type when getting subject is failed.
                 Equal to error message from response.
         """
-        with ThreadPoolExecutor(self._runner_cnt) as executor:
+        with ThreadPoolExecutor(self._workers_count) as executor:
             modules_results = self.__material_extractor(
                 access_token, course_id, executor
             )
-            resource_results = self.__resource_extractor(
-                access_token, course_id, executor
-            )
+            # Todo: resolve bug and re-enable LearningX resource
+            # resource_results = self.__resource_extractor(
+            #     access_token, course_id, executor
+            # )
 
         return [
             (name, url)
             for _, name, url in sorted(reduce(
-                add, chain(modules_results, resource_results)
+                # add, chain(modules_results, resource_results)
+                add, modules_results
             ))
             if not name.startswith('Error')
         ]

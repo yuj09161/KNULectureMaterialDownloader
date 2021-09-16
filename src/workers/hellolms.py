@@ -2,7 +2,8 @@ import re
 
 from bs4 import BeautifulSoup as bs
 
-from .commons import HEADER, BaseRunner
+from pyside_commons import ThreadRunner
+from .commons import HEADER
 
 LMS_URL_BASE = 'https://lms.knu.ac.kr'
 
@@ -12,7 +13,7 @@ EXCLUDE_TITLES = {
 }
 
 
-class LoginWorker(BaseRunner):
+class LoginWorker(ThreadRunner):
     def runner(self, session, username, passwd):
         return session.post(
             LMS_URL_BASE + '/ilos/lo/login.acl',
@@ -26,7 +27,7 @@ class LoginWorker(BaseRunner):
         ).json()
 
 
-class SubjectGetter(BaseRunner):
+class SubjectGetter(ThreadRunner):
     def runner(self, session, year, term_no):
         subjects = []
 
@@ -51,7 +52,7 @@ class SubjectGetter(BaseRunner):
         return subjects
 
 
-class SubjectSetter(BaseRunner):
+class SubjectSetter(ThreadRunner):
     def runner(self, session, subj_code):
         return session.post(
             LMS_URL_BASE + '/ilos/st/course/eclass_room2.acl',
@@ -65,7 +66,7 @@ class SubjectSetter(BaseRunner):
         ).json()
 
 
-class FileinfoGetter(BaseRunner):
+class FileinfoGetter(ThreadRunner):
     def runner(self, session, stu_id, subj_code):
         response = session.post(
             LMS_URL_BASE + '/ilos/st/course/lecture_material_list.acl',
