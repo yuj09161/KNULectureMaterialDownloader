@@ -37,6 +37,9 @@ class _ThreadRunnerBase(QThread):
 
         super().start(priority)
 
+    def run(self) -> None:
+        raise NotImplementedError
+
 
 class ThreadRunner(_ThreadRunnerBase):
     """The thread runner abstract class."""

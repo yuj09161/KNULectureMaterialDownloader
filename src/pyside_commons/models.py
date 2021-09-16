@@ -259,8 +259,7 @@ class CheckModelBase(ModelBase):
     def chk_enabled_cnt(self) -> int:
         cnt = 0
         for row in range(self.rowCount()):
-            item = self.item(row, 0)
-            if item.isEnabled():
+            if self.item(row, 0).isEnabled():
                 cnt += 1
         return cnt
 
@@ -268,10 +267,19 @@ class CheckModelBase(ModelBase):
     def chk_selected_cnt(self) -> int:
         cnt = 0
         for row in range(self.rowCount()):
-            item = self.item(row, 0)
-            if item.isEnabled():
+            if self.item(row, 0).checkState() == Qt.Checked:
                 cnt += 1
         return cnt
+
+    @property
+    def any_selected(self) -> bool:
+        row_cnt = self.rowCount()
+        if row_cnt == 0:
+            return False
+        for k in range(row_cnt):
+            if self.item(k, 0).checkState() == Qt.Checked:
+                return True
+        return False
 
     @property
     def all_selected(self) -> bool:
