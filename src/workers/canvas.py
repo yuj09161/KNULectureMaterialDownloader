@@ -116,20 +116,33 @@ class FileinfoGetter(ThreadRunner):
         c_response = requests.get(
             self.__CONTENTS_TEMPLATE.format(rid)
         )
-        ci_url = self.__CONTENTS_BASE_URL +\
-            re.search(r"var contentUri = '(.+)';", c_response.text)[1]
-        ci_response = requests.get(ci_url)
+        ci_url_match = re.search(r"var contentUri = '(.+)';", c_response.text)
+        if ci_url_match:
+            ci_response = requests.get(
+                self.__CONTENTS_BASE_URL + ci_url_match[1]
+            )
 
-        # Get contents download url and extension
-        download_url = self.__CONTENTS_BASE_URL + (
-            et.fromstring(ci_response.text)
-            .find('.//content_download_uri').text
-        )
-        extension = '.' + urllib.parse.parse_qs(
-            urllib.parse.urlparse(download_url).query
-        )['file_subpath'][0].rsplit('.', 1)[1]
+            # Get contents download url and extension
+            download_url = self.__CONTENTS_BASE_URL + (
+                et.fromstring(ci_response.text)
+                .find('.//content_download_uri').text
+            )
+            extension = '.' + urllib.parse.parse_qs(
+                urllib.parse.urlparse(download_url).query
+            )['file_subpath'][0].rsplit('.', 1)[1]
 
-        return download_url, extension
+            return download_url, extension
+
+        c_parser = bs(c_response.text, 'html.parser')
+        if c_parser.find('button', {'id': 'content_download_btn'}):
+            download_url = re.search(
+                "download_iframe.attr\\('src', \"(.+)\"\\);",
+                c_response.text
+            )[1]
+            return download_url, ''
+
+        print(f'Unexpected page: {rid}')
+        return 'Error', None
     # end common func
 
     # Material related functions
@@ -235,7 +248,7 @@ class FileinfoGetter(ThreadRunner):
         )
         # print(json.dumps(extracted_data, indent=4, ensure_ascii=False))
         # print(
-        #     session.cookies.get('xn_api_token', None), 
+        #     session.cookies.get('xn_api_token', None),
         #     session.cookies, sep='\n'
         # )
         session.headers.update({
