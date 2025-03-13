@@ -2,10 +2,8 @@ from PySide6.QtCore import Qt, QObject, Signal
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 import itertools
-from typing import (
-    Callable, Sequence, Iterable,
-    Union, Any, List, Tuple
-)
+from typing import\
+    Callable, Optional, Sequence, Iterable, Union, Any, List, Tuple
 
 
 class _StatusBridge(QObject):
@@ -52,12 +50,9 @@ class ModelBase(QStandardItemModel):
             Remove all rows.
     """
 
-    _header = NotImplemented
-
-    def __init__(self):
+    def __init__(self, parent: Optional[QObject] = None):
         """Create an instance of this class."""
-        super().__init__()
-        self._dummy = itertools.repeat(None)
+        super().__init__(parent)
         self._set_header()
 
     def _set_header(self) -> None:
@@ -68,8 +63,7 @@ class ModelBase(QStandardItemModel):
         Sets data of model to argument datas.
 
         Args:
-            datas (Iterable[Iterable[str]]):
-                The iterable that contains texts to display.
+            datas: The iterable that contains texts to display.
         """
         self.clear()
         for data in datas:
@@ -78,18 +72,16 @@ class ModelBase(QStandardItemModel):
 
     def add_data(
         self, data: Iterable[str],
-        items_at_first: Iterable[QStandardItem] = None,
-        items_at_last: Iterable[QStandardItem] = None
+        items_at_first: Optional[Iterable[QStandardItem]] = None,
+        items_at_last: Optional[Iterable[QStandardItem]] = None
     ) -> None:
         """
         Adds given data(texts) (and additional items(optinal)) to model.
 
         Args:
-            data (Iterable[str]): The texts to display.
-            items_at_first (Iterable[QStandardItem], optional):
-                If given, given items is inserted before the data.
-            items_at_last (Iterable[QStandardItem], optional):
-                If given, given items is inserted after the data.
+            data: The texts to display.
+            items_at_first: If given, given items is inserted before the data.
+            items_at_last: If given, given items is inserted after the data.
         """
         items = []
         for d in data:
@@ -113,7 +105,7 @@ class ModelBase(QStandardItemModel):
         Remove given row.
 
         Args:
-            k (int): The row number.
+            k: The row number.
         """
         self.removeRow(k)
 
@@ -184,42 +176,37 @@ class CheckModelBase(ModelBase):
         Create an instance of this class.
 
         Args:
-            default_check_state (Union[bool, Qt.CheckState]):
-                Sets the default check state.
+            default_check_state: Sets the default check state.
         """
         super().__init__()
 
         self.default_check_state = default_check_state
 
     def _set_header(self) -> None:
-        self.setHorizontalHeaderLabels(itertools.chain(
+        self.setHorizontalHeaderLabels(tuple(itertools.chain(
             (self._SELECT_COL_NAME,), getattr(self, '_header', tuple())
-        ))
+        )))
 
     def add_data(
         self, data: Iterable[str],
-        items_at_first: Iterable[QStandardItem] = None,
-        items_at_last: Iterable[QStandardItem] = None,
+        items_at_first: Optional[Iterable[QStandardItem]] = None,
+        items_at_last: Optional[Iterable[QStandardItem]] = None,
         *,
         chk_enabled: bool = True,
-        chk_state: Qt.CheckState = None
+        chk_state: Optional[Qt.CheckState] = None
     ) -> None:
         """
         Adds given data(texts) (and additional items(optinal)) to model.
 
         Args:
-            data (Iterable[str]):
-                The texts to display.
-            items_at_first (Iterable[QStandardItem], optional):
-                If given, given items is inserted before the data.
-            items_at_last (Iterable[QStandardItem], optional):
-                If given, given items is inserted after the data.
+            data: The texts to display.
+            items_at_first: If given, given items is inserted before the data.
+            items_at_last: If given, given items is inserted after the data.
 
         Keyword Args:
-            chk_enabled (bool, optional):
-                Enabled state of checkbox of the row.
-                Defaults to True.
-            chk_state (Qt.CheckState, optional):
+            chk_enabled:
+                Enabled state of checkbox of the row. Defaults to True.
+            chk_state:
                 State of checkbox of the row.
                 If not given,
                     the default_check_state property of class will be used.
@@ -236,14 +223,14 @@ class CheckModelBase(ModelBase):
         chk_iter = (chk_item,)
 
         if items_at_first:
-            items_at_first = itertools.chain(chk_item, items_at_first)
+            items_at_first = itertools.chain(chk_iter, items_at_first)
         else:
             items_at_first = chk_iter
 
         super().add_data(data, items_at_first, items_at_last)
 
     @property
-    def default_check_state(self) -> bool:
+    def default_check_state(self) -> Qt.CheckState:
         return self._default_check_state
 
     @default_check_state.setter
@@ -412,19 +399,18 @@ class InfoModelBase(CheckModelBase):
         Create an instance of this class.
 
         Args:
-            default_check_state (Union[bool, Qt.CheckState]):
-                Sets the default check state.
+            default_check_state: Sets the default check state.
         """
         self._infos = []
         super().__init__(default_check_state)
 
     def add_data(
         self, to_display: Iterable[str], infos: Any,
-        items_at_first: Iterable[QStandardItem] = None,
-        items_at_last: Iterable[QStandardItem] = None,
+        items_at_first: Optional[Iterable[QStandardItem]] = None,
+        items_at_last: Optional[Iterable[QStandardItem]] = None,
         *,
         chk_enabled: bool = True,
-        chk_state: Qt.CheckState = None
+        chk_state: Optional[Qt.CheckState] = None
     ) -> None:
         """
         Adds given data(texts) (and additional items(optinal)) to model.
@@ -432,21 +418,17 @@ class InfoModelBase(CheckModelBase):
         Checkbox will be placed at first column.
 
         Args:
-            to_display (Iterable[str]):
-                The texts to display.
-            infos (Any):
+            to_display: The texts to display.
+            infos:
                 The extra information.
                 Will be used output of info_of_selected property.
-            items_at_first (Iterable[QStandardItem], optional):
-                If given, given items is inserted before the data.
-            items_at_last (Iterable[QStandardItem], optional):
-                If given, given items is inserted after the data.
+            items_at_first: If given, given items is inserted before the data.
+            items_at_last: If given, given items is inserted after the data.
 
         Keyword Args:
-            chk_enabled (bool, optional):
-                Enabled state of checkbox of the row.
-                Defaults to True.
-            chk_state (Qt.CheckState, optional):
+            chk_enabled:
+                Enabled state of checkbox of the row. Defaults to True.
+            chk_state:
                 State of checkbox of the row.
                 If not given, the _DEFAULT_CHECK_STATE of class will be used.
         """
@@ -464,12 +446,12 @@ class InfoModelBase(CheckModelBase):
             info for k, info in enumerate(self._infos) if k in checked_row
         ]
 
-    def del_row(self, k: str) -> None:
+    def del_row(self, k: int) -> None:
         """
         Remove given row.
 
         Args:
-            k (int): The row number.
+            k: The row number.
         """
         super().del_row(k)
         del self._infos[k]
@@ -554,9 +536,8 @@ class WorkModelBase(InfoModelBase):
         Create an instance of this class.
 
         Args:
-            default_check_state (Union[bool, Qt.CheckState]):
-                Sets the default check state.
-            disable_successed (Union[bool, Qt.CheckState]):
+            default_check_state: Sets the default check state.
+            disable_successed:
                 If true, the checkbox of successed row will be disabled.
         """
         super().__init__(default_check_state)
@@ -564,19 +545,19 @@ class WorkModelBase(InfoModelBase):
         self.__disable_successed = disable_successed
 
     def _set_header(self) -> None:
-        self.setHorizontalHeaderLabels(itertools.chain(
+        self.setHorizontalHeaderLabels(tuple(itertools.chain(
             (self._SELECT_COL_NAME,),
             getattr(self, '_header', tuple()),
             ('상태',)
-        ))
+        )))
 
     def add_data(
-        self, to_display: Iterable[str], infos: Any,
-        items_at_first: Iterable[QStandardItem] = None,
-        items_at_last: Iterable[QStandardItem] = None,
+        self, to_display: Iterable[str], infos: Iterable[Any],
+        items_at_first: Optional[Iterable[QStandardItem]] = None,
+        items_at_last: Optional[Iterable[QStandardItem]] = None,
         *,
         chk_enabled: bool = True,
-        chk_state: Qt.CheckState = None
+        chk_state: Optional[Qt.CheckState] = None
     ) -> None:
         """
         Adds given data(texts) (and additional items(optinal)) to model.
@@ -585,18 +566,14 @@ class WorkModelBase(InfoModelBase):
         and Status will be placed at last column.
 
         Args:
-            to_display (Iterable[str]):
-                The texts to display.
-            items_at_first (Iterable[QStandardItem], optional):
-                If given, given items is inserted before the data.
-            items_at_last (Iterable[QStandardItem], optional):
-                If given, given items is inserted after the data.
+            to_display: The texts to display.
+            items_at_first: If given, given items is inserted before the data.
+            items_at_last: If given, given items is inserted after the data.
 
         Keyword Args:
-            chk_enabled (bool, optional):
-                Enabled state of checkbox of the row.
-                Defaults to True.
-            chk_state (Qt.CheckState, optional):
+            chk_enabled:
+                Enabled state of checkbox of the row. Defaults to True.
+            chk_state:
                 State of checkbox of the row.
                 If not given, the _DEFAULT_CHECK_STATE of class will be used.
         """
@@ -635,20 +612,20 @@ class WorkModelBase(InfoModelBase):
     def set_result(
         self,
         results: Sequence[Iterable],
-        disable_successed: bool = None
+        disable_successed: Optional[bool] = None
     ) -> None:
         """
         Set result of each selected row.
 
         Args:
-            results (Sequence[Iterable]):
+            results:
                 The results, in row order.
                 The Iterable must contain two items.
                     The type of first is bool,
                         and it means whether the work is successful.
                     The type of second is str,
                         and it is text to display.
-            disable_successed (bool, optional):
+            disable_successed:
                 If this is true, successed row is disabled.
                 If not given, it will be followed class's configuration.
         """
@@ -667,12 +644,12 @@ class WorkModelBase(InfoModelBase):
                 self.item(row, last_col).setText(text)
                 result_index += 1
 
-    def del_row(self, k: str) -> None:
+    def del_row(self, k: int) -> None:
         """
         Remove given row.
 
         Args:
-            k (int): The row number.
+            k: The row number.
         """
         super().del_row(k)
         self.__successed_row = \
