@@ -1,16 +1,17 @@
 from PySide6.QtCore import Signal, QThread
 
+from multiprocessing import cpu_count
 import asyncio
 import platform
 import traceback
-from multiprocessing import cpu_count
+import warnings
 
 from .exception_bridge import ExceptionBridge
 
 
 class _ThreadRunnerBase(QThread):
     ended = Signal(object)
-    err_raised = Signal(object)
+    err_raised = Signal()
 
     def __init__(self, parent, workers_count=0):
         super().__init__(parent)
@@ -31,26 +32,23 @@ class _ThreadRunnerBase(QThread):
 
         Keyword args:
             end (Callable[[Any], Any], optional): The callback function.
-            err (Dict, optional): The callback function.
-                (Structure of err:
-                    (root)\n
-                    ├─(code) [int]\n
-                    └─(func) [Callbale[[int], Any]]
-                )
+            err (Callbale[[], Any]): The error callback function.
         """
         # pylint: disable=attribute-defined-outside-init
-        try:
-            self.ended.disconnect()
-        except RuntimeError:
-            pass
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=RuntimeWarning)
+            try:
+                self.ended.disconnect()
+            except RuntimeError:
+                pass
+            try:
+                self.err_raised.disconnect()
+            except RuntimeError:
+                pass
         if 'end' in kwargs:
             self.ended.connect(kwargs.pop('end'))
         if 'err' in kwargs:
-            err = kwargs.pop('err')
-            self._err_code = err['code']
-            self.err_raised.connect(err['func'])
-        else:
-            self._err_code = None
+            self.err_raised.connect(kwargs.pop('err'))
         priority = kwargs.pop('priority', QThread.LowPriority)
 
         self._args = args
@@ -72,8 +70,7 @@ class ThreadRunner(_ThreadRunnerBase):
             ExceptionBridge().warning(
                 '오류', '작업 중 알 수 없는 오류', traceback.format_exc()
             )
-            if self._err_code is not None:
-                self.err_raised.emit(self._err_code)
+            self.err_raised.emit()
         else:
             self.ended.emit(result)
 
@@ -91,8 +88,7 @@ class AsyncioThreadRunner(_ThreadRunnerBase):
             ExceptionBridge().warning(
                 '오류', '작업 중 알 수 없는 오류', traceback.format_exc()
             )
-            if self._err_code is not None:
-                self.err_raised.emit(self._err_code)
+            self.err_raised.emit()
         else:
             self.ended.emit(result)
 

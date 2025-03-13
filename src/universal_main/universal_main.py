@@ -146,7 +146,8 @@ def _zipapp_package_installer() -> int:
                             curses_pyd.extract(name, curses_dir)
 
             return subprocess.run([
-                'py', installer_path, *to_install
+                'py' if IS_WINDOWS else sys.executable,
+                installer_path, *to_install
             ], check=False).returncode
 
 
@@ -183,12 +184,14 @@ def _normal_package_checker() -> int:
                         curses_pyd.extract(name, curses_dir)
 
             return subprocess.run([
-                'py', tmp_dir + '/package_installer.py', *to_install
+                'py' if IS_WINDOWS else sys.executable,
+                tmp_dir + '/package_installer.py', *to_install
             ], check=False).returncode
 
-    return subprocess.run(
-        ['py', FILE_DIR + 'package_installer.py', *to_install], check=False
-    ).returncode
+    return subprocess.run([
+        'py' if IS_WINDOWS else sys.executable,
+        FILE_DIR + 'package_installer.py', *to_install
+    ], check=False).returncode
 
 
 def main(main_module_name: str, main_func_name: str):

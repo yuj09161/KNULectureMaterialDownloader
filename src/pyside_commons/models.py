@@ -443,7 +443,7 @@ class InfoModelBase(CheckModelBase):
     def info_of_selected(self) -> List[Any]:
         checked_row = self.checked_row
         return [
-            info for k, info in enumerate(self._infos) if k in checked_row
+            (k, *info) for k, info in enumerate(self._infos) if k in checked_row
         ]
 
     def del_row(self, k: int) -> None:

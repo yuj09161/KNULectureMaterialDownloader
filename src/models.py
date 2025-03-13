@@ -4,6 +4,7 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem
 from typing import Union
 
 from pyside_commons import WorkModelBase
+from workers import MaterialTypes
 
 
 class HelloLMSSubjectsModel(QStandardItemModel):
@@ -33,6 +34,7 @@ class CanvasSubjectsModel(QStandardItemModel):
         self.__course_ids = []
 
     def set_subjects(self, subj_info: Union[list, tuple]):
+        self.clear()
         for subj in subj_info:
             self.add_data(*subj)
 
@@ -49,13 +51,18 @@ class CanvasSubjectsModel(QStandardItemModel):
 
 
 class Files(WorkModelBase):
+    __TYPE_TO_NAME = {
+        MaterialTypes.DOCUMENT: '자료',
+        MaterialTypes.VIDEO: '동영상',
+    }
+
     def __init__(self):
-        self._header = ('No.', '파일명')
+        self._header = ('No.', '종류', '파일명')
         super().__init__(True, False)
 
-    def add_data(self, name: str, url: str):
+    def add_data(self, name: str, type: str, url: str):
         # pylint: disable = arguments-differ
         super().add_data(
-            (str(self.rowCount() + 1), name), (name, url),
+            (str(self.rowCount() + 1), self.__TYPE_TO_NAME[type], name), (name, type, url),
             chk_state=Qt.Unchecked
         )

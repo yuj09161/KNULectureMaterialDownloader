@@ -1,32 +1,30 @@
 # pylint: disable = import-error
+from PySide6.QtCore import QTimer, Signal, QEvent
+from PySide6.QtGui import QStandardItem
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QMainWindow,
+    QDialog, QFileDialog, QProgressDialog, QMessageBox
+)
 
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox
-
+from configparser import ConfigParser
+from collections.abc import Callable
+from typing import Iterable
 import os
-import datetime
 import subprocess
-from typing import Union
-from enum import Enum, auto
 
-import requests
+import keyring
 
-from UI import Ui_MainWin
+from UI import Ui_MainWin, Ui_LoginWin
 from universal_main.universal_constants import (
     USER_DIR, DATADIR, PATHSEP, PROGRAM_DIR,
     IS_WINDOWS, IS_LINUX, IS_MACOS
 )
-from models import Files, HelloLMSSubjectsModel, CanvasSubjectsModel
+from pyside_commons import ExceptionBridge
+from models import Files, CanvasSubjectsModel
+from workers import LectureMaterial, MaterialTypes
+from workers.canvas import CanvasLoginWorker, CanvasSubjectGetter, CanvasFileInfoGetter
 from workers.commons import FileDownloader
-from workers.hellolms import (
-    LoginWorker as HelloLoginWorker,
-    SubjectGetter as HelloSubjectGetter,
-    SubjectSetter as HelloSubjectSetter,
-    FileinfoGetter as HelloFileinfoGetter
-)
-from workers.canvas import (
-    SubjectGetter as CanvasSubjectGetter,
-    FileinfoGetter as CanvasFileinfoGetter
-)
+from workers.knu import KNUIdPwLoginWorker, KNULoginPushSender, KNUPushLoginWorker
 
 os.chdir(PROGRAM_DIR)
 
@@ -50,436 +48,427 @@ def open_explorer(path):
         )
 
 
-class _DownloadSource(Enum):
-    HelloLMS = auto()
-    Canvas = auto()
+class LoginWin(QDialog, Ui_LoginWin):
+    __SERVICE_NAME = 'hys.LectureMaterialDownloader'
 
+    succeeded = Signal(object, object)
+    failed = Signal()
+
+    def __init__(self, parent, config: ConfigParser):
+        super().__init__(parent)
+        self.setupUi(self)
+
+        self.__config = config
+
+        self.__result_sent = False
+
+        self.__canvas_login_worker = CanvasLoginWorker(self)
+        self.__knu_idpw_login_worker = KNUIdPwLoginWorker(self)
+        self.__knu_login_push_sender = KNULoginPushSender(self)
+        self.__knu_push_login_worker = KNUPushLoginWorker(self)
+
+        self.rbIdPw.clicked.connect(self.__switch_to_idpw)
+        self.rbPush.clicked.connect(self.__switch_to_push)
+
+        self.lnUser.returnPressed.connect(lambda: self.lnPass.setFocus())
+        self.lnPass.returnPressed.connect(self.__login)
+        self.btnLogin.clicked.connect(self.__login)
+
+        match self.__config['credentials'].getint('login_method'):
+            case 0:
+                self.rbIdPw.setChecked(True)
+                # self.__switch_to_idpw()  # Useless
+            case 1:
+                self.rbPush.setChecked(True)
+                self.__switch_to_push()
+
+        if self.__config['credentials']['username']:
+            self.chkSaveId.setChecked(True)
+            self.lnUser.setText(self.__config['credentials']['username'])
+            self.lnPass.setFocus()
+        else:
+            self.chkSaveId.setChecked(False)
+            self.lnUser.setFocus()
+
+        self.chkAutoLogin.setChecked(
+            self.__config['credentials'].getboolean('auto_login')
+        )
+
+    def __switch_to_idpw(self):
+        self.lnUser.returnPressed.disconnect()
+        self.lnUser.returnPressed.connect(lambda: self.lnPass.setFocus())
+        self.glLogin.removeWidget(self.lbUser)
+        self.glLogin.removeWidget(self.lnUser)
+        self.glLogin.addWidget(self.lbUser, 0, 0, 1, 1)
+        self.glLogin.addWidget(self.lnUser, 0, 1, 1, 1)
+        self.lbPass.show()
+        self.lnPass.show()
+
+    def __switch_to_push(self):
+        self.lnUser.returnPressed.disconnect()
+        self.lnUser.returnPressed.connect(self.__login)
+        self.glLogin.removeWidget(self.lbUser)
+        self.glLogin.removeWidget(self.lnUser)
+        self.glLogin.addWidget(self.lbUser, 0, 0, 2, 1)
+        self.glLogin.addWidget(self.lnUser, 0, 1, 2, 1)
+        self.lbPass.hide()
+        self.lnPass.hide()
+
+    def __write_config(self):
+        self.__config['credentials']['username'] =\
+            self.lnUser.text() if self.chkSaveId.isChecked() else ''
+        self.__config['credentials']['auto_login'] = str(self.chkAutoLogin.isChecked())
+        self.__config['credentials']['login_method'] = str((
+            self.rbIdPw.isChecked(), self.rbPush.isChecked()
+        ).index(True))
+
+        if self.chkAutoLogin.isChecked() and self.rbIdPw.isChecked():
+            keyring.set_password(self.__SERVICE_NAME, self.lnUser.text(), self.lnPass.text())
+        else:
+            try:
+                keyring.delete_password(self.__SERVICE_NAME, self.lnUser.text())
+            except keyring.errors.PasswordDeleteError:
+                pass
+
+    def __auto_login(self):
+        if self.rbIdPw.isChecked():
+            try:
+                password = keyring.get_password(self.__SERVICE_NAME, self.lnUser.text())
+            except keyring.errors.KeyringError:
+                QMessageBox.warning(
+                    self, '키링 오류',
+                    '키링 잠금 해제 실패\n암호 직접 입력 필요',
+                    QMessageBox.Cancel
+                )
+            else:
+                if password is None:
+                    self.chkAutoLogin.setChecked(False)
+                    QMessageBox.critical(
+                        self, '암호 없음',
+                        '자동 로그인이 활성화되었지만,\n암호가 저장되어 있지 않음',
+                        QMessageBox.Cancel
+                    )
+                else:
+                    self.lnPass.setText(password)
+                    self.__login()
+        else:  # self.rbPush.isChecked()
+            self.__login()
+
+    def __login(self):
+        def error_cleanup():
+            progress_dialog.reset()
+
+        def push_sent(result: str):
+            if not result['success']:
+                progress_dialog.reset()
+                QMessageBox.warning(self, '로그인 실패', f"{result['message']} ({result['code']})")
+                return
+
+            progress_dialog.setLabelText('승인 대기 중')
+            match QMessageBox.information(
+                self, '승인 필요',
+                'KNUPIA 앱에서 로그인을 승인한 후, 확인 버튼을 눌러주세요',
+                QMessageBox.Ok, QMessageBox.Cancel
+            ):
+                case QMessageBox.Ok:
+                    progress_dialog.setLabelText('통합정보시스템 로그인 중')
+                    self.__knu_push_login_worker.start(
+                        self.lnUser.text(), result['trial'], end=on_knu_login
+                    )
+                case _:
+                    progress_dialog.reset()
+
+        def on_knu_login(result: dict[str, bool | str]):
+            if result['success']:
+                progress_dialog.setLabelText('Canvas 로그인 중')
+                self.__canvas_login_worker.start(result['knu_session'], end=login_done, err=error_cleanup)
+            else:
+                QMessageBox.warning(self, '로그인 실패', f"{result['message']} ({result['code']})")
+                progress_dialog.reset()
+
+        def login_done(session_ids: dict[str, str]):
+            self.succeeded.emit(session_ids['canvas_session'], session_ids['learningx_session'])
+            self.__result_sent = True
+            progress_dialog.reset()
+            self.close()
+
+        self.__write_config()
+
+        if self.rbIdPw.isChecked():
+            progress_dialog = QProgressDialog('통합정보시스템 로그인 중', None, 0, 0, self)
+            self.__knu_idpw_login_worker.start(
+                self.lnUser.text(), self.lnPass.text(),
+                end=on_knu_login, err=error_cleanup
+            )
+            progress_dialog.exec()
+        elif self.rbPush.isChecked():
+            progress_dialog = QProgressDialog('KNUPIA 푸시 전송 중', None, 0, 0, self)
+            self.__knu_login_push_sender.start(
+                self.lnUser.text(),
+                end=push_sent, err=error_cleanup
+            )
+            progress_dialog.exec()
+        else:
+            raise RuntimeError('No login method selected.')
+
+    def showEvent(self, _):
+        parent: QWidget = self.parent()
+        self.setFixedHeight(self.height())
+        self.move(
+            parent.x() + (parent.width() - self.width()) // 2,
+            parent.y() + (parent.height() - self.height()) // 2
+        )
+        if self.chkAutoLogin.isChecked():
+            QTimer.singleShot(50, self.__auto_login)
+
+    def closeEvent(self, event) -> None:
+        self.__write_config()
+        if not self.__result_sent:
+            self.failed.emit()
+        super().closeEvent(event)
 
 class MainWin(QMainWindow, Ui_MainWin):
-    __CFG_DIR = DATADIR + 'hys.LectureMaterialDownloader/'
-    __CFG_FILE = __CFG_DIR + 'config'
+    __CONFIG_DIR = DATADIR + 'hys.LectureMaterialDownloader/'
+    __CONFIG_FILE = __CONFIG_DIR + 'config.ini'
+
+    download_result = Signal(QStandardItem, str)
 
     def __init__(self):
         super().__init__()
         self.setupUi(self)
 
-        self.__files = Files()
-        self.__hellolms_subjects = HelloLMSSubjectsModel()
-        self.__canvas_subjects = CanvasSubjectsModel()
+        ExceptionBridge(self)
 
-        self.__dst = USER_DIR
-        self.__download_source = None
-        self.__session = requests.Session()
-
-        # common worker
-        self.__file_downloader = FileDownloader(self)
-
-        # hellolms worker
-        self.__hello_login_worker = HelloLoginWorker(self)
-        self.__hello_subject_getter = HelloSubjectGetter(self)
-        self.__hello_subject_setter = HelloSubjectSetter(self)
-        self.__hello_fileinfo_worker = HelloFileinfoGetter(self)
-
-        # canvas lms worker
-        self.__canvas_subject_getter = CanvasSubjectGetter(self)
-        self.__canvas_fileinfo_worker = CanvasFileinfoGetter(self)
-
-        self.tvFile.setModel(self.__files)
-
-        self.cbSemester.currentIndexChanged.connect(self.__after_smst_change)
-        self.cbSubject.currentIndexChanged.connect(self.__after_subj_change)
-
-        self.rbHellolms.clicked.connect(self.__switch_to_hellolms)
-        self.rbCanvas.clicked.connect(self.__switch_to_canvas)
-
-        self.tvFile.clicked.connect(self.__set_btnSelect_text)
-
-        self.lbDst.clicked.connect(lambda: open_explorer(self.__dst))
-        self.btnSetDst.clicked.connect(self.__set_dst)
-        self.btnSelect.clicked.connect(self.__select)
-        self.btnReverse.clicked.connect(self.__reverse_selection)
-        self.btnDownload.clicked.connect(self.__download)
-        self.btnLogin.clicked.connect(self.__login)
-        self.btnSetSmst.clicked.connect(self.__get_subject)
-        self.btnSetSubj.clicked.connect(self.__set_subject)
-
-        self.__switch_to_hellolms()
-        self.__guess_semester()
+        self.__config = ConfigParser()
         self.__load_config()
 
-        self.rbHellolms.setChecked(True)
+        self.__login_win = LoginWin(self, self.__config)
+
+        self.__files = Files()
+        self.__canvas_subjects = CanvasSubjectsModel()
+
+        self.__canvas_session: str = ''
+        self.__learningx_session: str = ''
+        self.__all_subjects: dict[str, list[tuple[str, str]]] = {}
+
+        # Workers
+        self.__canvas_subject_getter = CanvasSubjectGetter(self)
+        self.__canvas_file_info_getter = CanvasFileInfoGetter(self)
+        self.__file_downloader = FileDownloader(self)
+
+        self.tvFile.setModel(self.__files)
+        self.cbSubject.setModel(self.__canvas_subjects)
+
+        self.__login_win.succeeded.connect(self.__update_sessions)
+        self.__login_win.failed.connect(self.close)
+
+        self.cbSemester.currentIndexChanged.connect(self.__on_semester_changed)
+        self.cbSubject.currentIndexChanged.connect(self.__on_subject_changed)
+
+        self.tvFile.clicked.connect(self.__set_btn_select_text)
+
+        self.btnOpenDst.clicked.connect(
+            lambda: open_explorer(self.__config['download']['destination'])
+        )
+        self.btnSetDst.clicked.connect(self.__set_destination)
+
+        self.btnSelect.clicked.connect(self.__select_or_unselect_all)
+        self.btnReverse.clicked.connect(self.__reverse_selection)
+        self.btnDownload.clicked.connect(self.__download)
+
+        self.btnSetSubject.clicked.connect(self.__set_subject)
+
+        self.download_result.connect(self.__on_download_result)
+
+        self.__set_item_selection_selected(False)
+        self.__set_subject_selection_enabled(False)
 
     # Display related functions
-    def __guess_semester(self):
-        today = datetime.date.today()
-        self.spinYear.setValue(today.year)
-        self.cbSemester.setCurrentIndex(2 * (today.month > 7))
+    def showEvent(self, event):
+        if self.__canvas_session:
+            assert self.__learningx_session
+        else:
+            QTimer.singleShot(50, lambda: self.__login_win.exec())
+        return super().showEvent(event)
 
-    def __set_sourcerb_enabled(self, state: bool):
-        self.rbHellolms.setEnabled(state)
-        self.rbCanvas.setEnabled(state)
+    def __set_subject_selection_enabled(self, state: bool):
+        self.cbSubject.setEnabled(state)
+        self.btnSetSubject.setEnabled(state)
 
-    def __set_download_enabled(self, state: bool):
+    def __set_item_selection_selected(self, state: bool):
         self.btnSelect.setEnabled(state)
         self.btnReverse.setEnabled(state)
         self.btnDownload.setEnabled(state)
 
-    def __set_smst_enabled(self, state: bool):
-        self.spinYear.setEnabled(state)
-        self.cbSemester.setEnabled(state)
-        self.btnSetSmst.setEnabled(state)
-
-    def __set_subj_enabled(self, state: bool):
-        self.cbSubject.setEnabled(state)
-        self.btnSetSubj.setEnabled(state)
-
-    def __set_login_lineedit_enabled(self, state: bool):
-        enable_user = \
-            state and self.__download_source == _DownloadSource.HelloLMS
-        self.lnUser.setEnabled(enable_user)
-        self.lnPass.setEnabled(enable_user)
-        self.lnId.setEnabled(state)
-
-    def __set_login_state(self, state: bool):
+    def __on_semester_changed(self):
+        self.__set_item_selection_selected(False)
         self.__files.clear()
-        self.__set_download_enabled(False)
-        self.__set_subj_enabled(False)
-        if state:
-            self.__set_smst_enabled(True)
-            self.__set_login_lineedit_enabled(False)
-            self.btnLogin.setText('로그아웃')
-            try:
-                self.btnLogin.clicked.disconnect()
-            except RuntimeError:
-                pass
-            self.btnLogin.clicked.connect(
-                lambda: self.__set_login_state(False)
-            )
-        else:
-            self.__set_smst_enabled(False)
-            self.__set_login_lineedit_enabled(True)
-            self.lnUser.clear()
-            self.lnPass.clear()
-            self.lnId.clear()
-            self.btnLogin.setText('로그인')
-            try:
-                self.btnLogin.clicked.disconnect()
-            except RuntimeError:
-                pass
-            self.btnLogin.clicked.connect(self.__login)
+        self.__canvas_subjects.set_subjects(self.__all_subjects[self.cbSemester.currentText()])
 
-    def __start_work(self, msg: str):
-        self.__set_sourcerb_enabled(False)
-        self.__set_download_enabled(False)
-        self.__set_smst_enabled(False)
-        self.__set_subj_enabled(False)
-        self.btnLogin.setEnabled(False)
-
-        self.statusbar.showMessage(msg)
-        self.pg.setRange(0, 0)
-
-    def __end_work(self):
-        self.pg.setRange(0, 1)
-        self.statusbar.clearMessage()
-
-        self.__set_sourcerb_enabled(True)
-        self.__set_download_enabled(True)
-        self.__set_smst_enabled(True)
-        self.__set_subj_enabled(True)
-        self.btnLogin.setEnabled(True)
-
-    def __after_smst_change(self):
-        self.__set_subj_enabled(False)
-        self.cbSubject.clear()
-
-    def __after_subj_change(self):
-        self.__set_download_enabled(False)
+    def __on_subject_changed(self):
+        self.__set_item_selection_selected(False)
         self.__files.clear()
+
+    def __on_download_result(self, item: QStandardItem, progress: str):
+        item.setText(progress)
     # end display
 
-    # Source setting related functions
-    def __switch_to_hellolms(self):
-        if self.__download_source != _DownloadSource.HelloLMS:
-            self.lbUser.setText('LMS 사용자명')
-            self.lbPass.setText('LMS 비밀번호')
-            self.lbId.setText('학번')
-
-            self.cbSubject.setModel(self.__hellolms_subjects)
-            self.lnId.returnPressed.connect(self.__login)
-            self.lnId.setEnabled(True)
-            try:
-                self.lnPass.returnPressed.disconnect()
-            except RuntimeError:
-                pass
-            self.__download_source = _DownloadSource.HelloLMS
-            self.__set_login_state(False)
-
-    def __switch_to_canvas(self):
-        if self.__download_source != _DownloadSource.Canvas:
-            self.lbUser.setText(f"{'-':^11}")
-            self.lbPass.setText(f"{'-':^11}")
-            self.lbId.setText('Access Token')
-
-            self.cbSubject.setModel(self.__canvas_subjects)
-            self.lnId.setEnabled(False)
-            try:
-                self.lnId.returnPressed.disconnect()
-            except RuntimeError:
-                pass
-            self.lnPass.returnPressed.connect(self.__login)
-            self.__download_source = _DownloadSource.Canvas
-            self.__set_login_state(False)
-    # end source
-
-    def __set_dst(self):
+    def __set_destination(self):
         dst = QFileDialog.getExistingDirectory(
-            self, '저장할 폴더 선택', self.__dst
+            self, '저장할 폴더 선택', self.__config['download']['destination']
         )
         if dst:
-            self.__dst = os.path.abspath(dst) + PATHSEP
-            self.lbDst.setText(self.__dst[:-1])
+            self.__config['download']['destination'] = os.path.abspath(dst) + PATHSEP
+            self.lbDst.setText(self.__config['download']['destination'][:-1])
 
     # Selection related functions
-    def __select(self):
+    def __select_or_unselect_all(self):
         if self.__files.all_selected:
             self.__files.clear_selection()
-            self.__set_btnSelect_text(False)
         else:
             self.__files.select_all()
-            self.__set_btnSelect_text(True)
-
-    def __set_btnSelect_text(self, arg: Union[int, bool]):
-        if not isinstance(arg, bool):
-            is_all_selected = arg.column() == 0 and self.__files.all_selected
-        else:
-            is_all_selected = arg
-        self.btnSelect.setText('선택 해제' if is_all_selected else '모두 선택')
+        self.__set_btn_select_text()
 
     def __reverse_selection(self):
         self.__files.reverse_selection()
-        self.__set_btnSelect_text(self.__files.all_selected)
+        self.__set_btn_select_text()
+
+    def __set_btn_select_text(self, _ = None):
+        self.btnSelect.setText(('모두 선택', '선택 해제')[self.__files.all_selected])
     # end selection
 
-    # HelloLMS worker functions
-    def __hello_login(self):
-        def end(response):
-            self.__end_work()
-            is_error = response['isError']
-            if is_error:
-                self.__set_login_state(False)
-                self.gbLogin.setTitle('로그인 상태: 로그인 실패')
-                QMessageBox.warning(self, '로그인 실패', response['message'])
-            else:
-                self.__set_login_state(True)
-                self.gbLogin.setTitle('로그인 상태: 로그인됨')
-
-        self.__start_work('로그인 중')
-        self.__hello_login_worker.start(
-            self.__session, self.lnUser.text(), self.lnPass.text(), end=end
-        )
-
-    def __hello_get_subject(self):
-        def end(subjects):
-            self.__end_work()
-            self.__set_download_enabled(False)
-            if subjects:
-                self.__hellolms_subjects.set_subjects(subjects)
-            else:
-                self.__set_subj_enabled(False)
-                QMessageBox.warning(
-                    self, '과목 조회 실패',
-                    '해당 학기에 조회된 수강과목 없음'
-                )
-
-        self.__start_work('과목 조회 중')
-        self.__hellolms_subjects.clear()
-        self.__hello_subject_getter.start(
-            self.__session, self.spinYear.value(),
-            self.cbSemester.currentIndex(),
-            end=end
-        )
-
-    def __hello_set_subject(self):
-        def end(response):
-            is_error = response['isError']
-            if is_error:
-                self.__end_work()
-                self.gbSubject.setTitle('과목명: 설정 안 됨')
-                self.__set_download_enabled(False)
-                QMessageBox.warning(self, '과목 설정 실패', response['message'])
-            else:
-                self.__files.clear()
-                self.gbSubject.setTitle(f'과목명: {self.cbSubject.currentText()}')
-                self.__hello_get_info_of_files()
-
-        self.__start_work('강의 들어가는 중')
-        subj_code = self.__hellolms_subjects.get_current_code(
-            self.cbSubject.currentIndex()
-        )
-        self.__hello_subject_setter.start(self.__session, subj_code, end=end)
-
-    def __hello_get_info_of_files(self):
-        def end(datas):
-            self.__end_work()
-            if not datas:
-                self.__set_download_enabled(False)
-                QMessageBox.information(
-                    self, '강의자료 없음', '해당 과목의 강의자료 없음'
-                )
-            else:
-                for data in datas:
-                    self.__files.add_data(*data)
-                for k in range(self.__files.columnCount()):
-                    self.tvFile.resizeColumnToContents(k)
-
-        self.__start_work('강의자료 목록 가져오는 중')
-        subj_code = self.__hellolms_subjects.get_current_code(
-            self.cbSubject.currentIndex()
-        )
-        self.__hello_fileinfo_worker.start(
-            self.__session, self.lnId.text(), subj_code,
-            end=end
-        )
-    # end HelloLMS
-
     # Canvas worker functions
-    def __canvas_login(self):
+    def __logout(self):
+        def error_cleanup():
+            self.__is_logined = False
+            progress_dialog.reset()
+
         def end(result):
-            self.__end_work()
-            if isinstance(result, list):
-                self.__set_login_state(True)
-                self.__set_subj_enabled(True)
-                self.gbLogin.setTitle('로그인 상태: 로그인됨')
-                if not result:
-                    QMessageBox.warning(
-                        self, '과목 없음', '현재 학기에 조회된 과목 없음'
-                    )
-                else:
-                    self.__canvas_subjects.set_subjects(result)
-            else:
-                self.__set_login_state(False)
-                QMessageBox.warning(self, '과목 조회 실패', result)
+            self.__is_logined = False
+            progress_dialog.reset()
 
-        self.__start_work('로그인 정보 확인(과목 조회) 중')
-        self.__canvas_subject_getter.start(
-            f'{self.spinYear.value()}년', self.cbSemester.currentText(),
-            self.lnId.text(),
-            end=end
-        )
-
-    def __canvas_get_subject(self):
-        def end(result):
-            if isinstance(result, list):
-                if not result:
-                    QMessageBox.warning(
-                        self, '과목 없음', '해당 학기에 조회된 과목 없음'
-                    )
-                else:
-                    self.__canvas_subjects.set_subjects(result)
-            else:
-                QMessageBox.warning(self, '과목 조회 실패', result)
-            self.__end_work()
-
-        self.__start_work('과목 조회 중')
-        self.__canvas_subject_getter.start(
-            f'{self.spinYear.value()}년', self.cbSemester.currentText(),
-            self.lnId.text(),
-            end=end
-        )
-
-    def __canvas_get_info_of_files(self):
-        def end(result):
-            self.__end_work()
-            if isinstance(result, list):
-                if not result:
-                    self.__set_download_enabled(False)
-                    QMessageBox.information(
-                        self, '강의자료 없음', '해당 과목의 강의자료 없음'
-                    )
-                else:
-                    for data in result:
-                        self.__files.add_data(*data)
-                    for k in range(self.__files.columnCount()):
-                        self.tvFile.resizeColumnToContents(k)
-            else:
-                self.__set_download_enabled(False)
-                QMessageBox.warning(self, '파일 가져오기 실패', result)
-
-        self.__start_work('강의자료 목록 가져오는 중')
-        self.__canvas_fileinfo_worker.start(
-            self.lnId.text(), self.__canvas_subjects.get_current_id(
-                self.cbSubject.currentIndex()
-            ), end=end
-        )
-    # end Canvas
-
-    # Worker switcher functions
-    def __login(self):
-        if self.__download_source == _DownloadSource.HelloLMS:
-            self.__hello_login()
-        elif self.__download_source == _DownloadSource.Canvas:
-            self.__canvas_login()
-        else:
-            raise ValueError(f'Invalid source: {self.__download_source}')
-
-    def __get_subject(self):
-        if self.__download_source == _DownloadSource.HelloLMS:
-            self.__hello_get_subject()
-        elif self.__download_source == _DownloadSource.Canvas:
-            self.__canvas_get_subject()
-        else:
-            raise ValueError(f'Invalid source: {self.__download_source}')
+        progress_dialog = QProgressDialog('로그아웃 중', None, 0, 0, self)
+        progress_dialog.exec()
 
     def __set_subject(self):
-        if self.__download_source == _DownloadSource.HelloLMS:
-            self.__hello_set_subject()
-        elif self.__download_source == _DownloadSource.Canvas:
-            self.__canvas_get_info_of_files()
-        else:
-            raise ValueError(f'Invalid source: {self.__download_source}')
-    # end switchers
+        def error_cleanup():
+            progress_dialog.reset()
+
+        def end(materials: Iterable[LectureMaterial]):
+            self.__files.clear()
+
+            if not materials:
+                QMessageBox.information(self, '강의자료 없음', '해당 과목의 강의자료 없음')
+                progress_dialog.reset()
+                return
+
+            for name, type, url in materials:
+                self.__files.add_data(name, type, url)
+            for k in range(self.__files.columnCount()):
+                self.tvFile.resizeColumnToContents(k)
+            self.__set_item_selection_selected(True)
+            progress_dialog.reset()
+
+        progress_dialog = QProgressDialog('강의자료 목록 가져오는 중', None, 0, 0, self)
+        self.__canvas_file_info_getter.start(
+            self.__canvas_session,
+            self.__learningx_session,
+            self.__canvas_subjects.get_current_id(
+                self.cbSubject.currentIndex()
+            ),
+            end=end,
+            err=error_cleanup
+        )
+        progress_dialog.exec()
+    # end Canvas
+
+    def __update_sessions(self, canvas_session: str, learningx_session: str):
+        def error_cleanup():
+            progress_dialog.reset()
+
+        def end(subjects: dict[str, list[tuple[str, str]]]):
+            if not subjects:
+                QMessageBox.information(self, '과목 없음', '수강중인 과목이 없음')
+                progress_dialog.reset()
+                return
+
+            self.__all_subjects = subjects
+            self.cbSemester.addItems(sorted(subjects.keys()))
+            self.cbSemester.setCurrentIndex(len(subjects) - 1)
+            self.__canvas_subjects.set_subjects(subjects[self.cbSemester.currentText()])
+            self.__set_subject_selection_enabled(True)
+
+            progress_dialog.reset()
+
+        def refresh_subjects():
+            self.__canvas_subject_getter.start(
+                self.__canvas_session,
+                end=end,
+                err=error_cleanup
+            )
+            self.__canvas_subjects.clear()
+            progress_dialog.exec()
+
+        progress_dialog = QProgressDialog('과목 조회 중', None, 0, 0, self)
+
+        self.__canvas_session = canvas_session
+        self.__learningx_session = learningx_session
+
+        QTimer.singleShot(10, refresh_subjects)
 
     # Common workers
     def __download(self):
-        def end(results):
-            self.__files.set_result(results)
-            self.__end_work()
-            self.btnSetDst.setEnabled(True)
+        def error_cleanup():
+            progress_dialog.reset()
 
-        selected = self.__files.info_of_selected
-        if selected:
-            self.btnSetDst.setEnabled(False)
-            self.__start_work('강의자료 다운로드 중')
-            self.__file_downloader.start(
-                self.__session, selected, self.__dst, end=end
-            )
-        else:
-            QMessageBox.information(
-                self, '알림', '선택된 파일이 없음'
-            )
+        def end(download_results):
+            self.__files.set_result(download_results)
+            progress_dialog.reset()
 
-    # def __load_default_config(self):
+        def new_callback(index: int) -> Callable[[str], None]:
+            def inner(progress: str):
+                self.download_result.emit(self.__files.item(index, 4), progress)
+            return inner
+
+        selected: Iterable[tuple[int, str, MaterialTypes, str]] = self.__files.info_of_selected
+        if not selected:
+            QMessageBox.information(self, '알림', '선택된 파일이 없음')
+            return
+
+        progress_dialog = QProgressDialog('강의자료 다운로드 중', None, 0, 0, self)
+        works = [(name, type_, url, new_callback(idx)) for idx, name, type_, url in selected]
+        self.__file_downloader.start(
+            works, self.__config['download']['destination'], end=end, err=error_cleanup
+        )
+        progress_dialog.exec()
+
+    def __load_default_config(self):
+        self.__config['download'] = {
+            'destination': USER_DIR
+        }
+        self.__config['credentials'] = {
+            'username': '',
+            'auto_login': 'False',
+            'login_method': '0'
+        }
 
     def __load_config(self):
-        if os.path.isfile(self.__CFG_FILE):
-            with open(self.__CFG_FILE, 'r', encoding='utf-8') as file:
-                self.__dst = file.read()
-        # else:
-        # self.__load_default_config()
-
-        self.lbDst.setText(self.__dst[:-1])
+        if os.path.isfile(self.__CONFIG_FILE):
+            self.__config.read(self.__CONFIG_FILE)
+        else:
+            self.__load_default_config()
+        self.lbDst.setText(self.__config['download']['destination'])
 
     def __save_config(self):
-        if not os.path.isdir(self.__CFG_DIR):
-            os.makedirs(self.__CFG_DIR)
+        os.makedirs(self.__CONFIG_DIR, exist_ok=True)
+        with open(self.__CONFIG_FILE, 'w', encoding='utf-8') as file:
+            self.__config.write(file)
+    # end Common workers
 
-        with open(self.__CFG_FILE, 'w', encoding='utf-8') as file:
-            file.write(self.__dst)
-
-    def closeEvent(self, event):
+    def closeEvent(self, event: QEvent):
+        # self.__logout()
         self.__save_config()
         event.accept()
-    # end Common workers
 
 
 def main(app):
@@ -490,7 +479,5 @@ def main(app):
 
 
 if __name__ == '__main__':
-    from PySide6.QtWidgets import QApplication
-
     app = QApplication()
     main(app)

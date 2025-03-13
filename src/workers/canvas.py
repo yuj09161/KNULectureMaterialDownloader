@@ -1,21 +1,35 @@
-import re
-import json
-import urllib.parse
-import xml.etree.ElementTree as et
-from typing import Union
-from operator import add
-from functools import reduce
-from itertools import repeat, chain
+from base64 import b64decode
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor, Future
+from functools import reduce
+from html import unescape as html_unescape
+from http.cookiejar import Cookie
+from itertools import repeat, chain
+from operator import add
+from typing import NamedTuple
+import xml.etree.ElementTree as et
+import json
+import os
+import re
+import urllib.parse
+import warnings
 
+
+from bs4 import BeautifulSoup, Tag, XMLParsedAsHTMLWarning
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_v1_5
+from Crypto.Hash import SHA256
 import requests
-from bs4 import BeautifulSoup as bs
 
 from pyside_commons import ThreadRunner
+from . import MaterialTypes, LectureMaterial
 
+
+CANVAS_SESSION = '_normandy_session'
+LEARNINGX_SESSION = 'xn_api_token'
 
 CANVAS_URL = 'https://canvas.knu.ac.kr'
+USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 
 
 def _join_url_token(
@@ -26,242 +40,321 @@ def _join_url_token(
     return url + '?access_token=' + access_token
 
 
-class SubjectGetter(ThreadRunner):
-    __SUBJECT_GET_URL = CANVAS_URL + '/api/v1/courses'
+class CanvasLoginWorker(ThreadRunner):
+    def runner(self, knu_session: str):
+        def parse_form(content: str, form_id: str) -> dict[str, str]:
+            parser = BeautifulSoup(content, 'html.parser')
+            form_tag = parser.find('form', {'id': form_id})
+            form_content = {}
+            for child in form_tag.children:
+                if isinstance(child, Tag):
+                    for attr in ('name', 'id'):
+                        tag_type = child.get(attr)
+                        if tag_type is not None:
+                            break
+                    else:
+                        raise ValueError(f"Can't find tag type. ({child})")
+                    form_content[tag_type] = child.get('value', '')
+            return form_content
 
-    def runner(
-        self, year: str, semester: str, access_token: str
-    ) -> Union[list, str]:
-        """
-        Get subjects list.
-
-        Args:
-            session (aiohttp.ClientSession): The session to use.
-            year (str): The year to get. (in YYYY년)
-            semester (str): The semester to get. (in S학기)
-            access_token(str): The token generated from account setting.
-
-        Returns:
-            list:
-                Return this type when getting subject is successed.
-                Contains tuple of (subject name, canvas course id).
-            str:
-                Return this type when getting subject is failed.
-                Equal to error message from response.
-        """
-        response = requests.get(_join_url_token(
-            self.__SUBJECT_GET_URL, access_token, ('include=term',)
-        ))
-        if response.status_code == 200:
-            return [
-                (subject['name'], subject['id'])
-                for subject in response.json()
-                if subject['term']['name'] == f'{year} {semester}'
-            ]
-        else:
-            return response.json()['errors'][0]['message']
-
-
-class FileinfoGetter(ThreadRunner):
-    __MODULES_URL = CANVAS_URL + '/api/v1/courses/{}/modules'
-    __EXTERNAL_TOOL_URL = (
-        CANVAS_URL
-        + '/api/v1/courses/{}/external_tools'
-        + '/sessionless_launch'
-    )
-    __RESOURCE_TOOL_ID = '2'
-    __RESOURCE_DB_URL = \
-        CANVAS_URL + '/learningx/api/v1/courses/{}/resources_db'
-    __CONTENTS_TEMPLATE = 'https://lcms.knu.ac.kr/em/{}'
-    __CONTENTS_BASE_URL = 'https://lcms.knu.ac.kr'
-
-    def runner(
-        self, access_token: str, course_id: int
-    ) -> Union[list, str]:
-        """
-        Get material files within the subject.
-
-        Args:
-            session (aiohttp.ClientSession): The session to use.
-            access_token(str): The token generated from account setting.
-            course_id(int): The canvas course id (returned from SubjectGetter).
-
-        Returns:
-            list:
-                Return this type when getting subject is successed.
-                Contains tuple of (Filename with extension, Download URL).
-            str:
-                Return this type when getting subject is failed.
-                Equal to error message from response.
-        """
-        with ThreadPoolExecutor(self._workers_count) as executor:
-            modules_results = self.__material_extractor(
-                access_token, course_id, executor
+        def get_session_tokens(session: requests.Session) -> None:
+            response = session.get(
+                CANVAS_URL, headers={
+                    'User-Agent': USER_AGENT,
+                    'Accept': 'text/html',
+                }
             )
-            resource_results = self.__resource_extractor(
-                access_token, course_id, executor
-            )
-
-        return [
-            (name, url)
-            for _, name, url in sorted(reduce(
-                add, chain(modules_results, resource_results)
-            ))
-            if not name.startswith('Error')
-        ]
-
-    # Common functions
-    def __lcms_extractor(self, rid: str) -> tuple:
-        # Get contents info
-        c_response = requests.get(
-            self.__CONTENTS_TEMPLATE.format(rid)
-        )
-        ci_url_match = re.search(r"var contentUri = '(.+)';", c_response.text)
-        if ci_url_match:
-            ci_response = requests.get(
-                self.__CONTENTS_BASE_URL + ci_url_match[1]
-            )
-
-            # Get contents download url and extension
-            download_url = self.__CONTENTS_BASE_URL + (
-                et.fromstring(ci_response.text)
-                .find('.//content_download_uri').text
-            )
-            extension = '.' + urllib.parse.parse_qs(
-                urllib.parse.urlparse(download_url).query
-            )['file_subpath'][0].rsplit('.', 1)[1]
-
-            return download_url, extension
-
-        c_parser = bs(c_response.text, 'html.parser')
-        if c_parser.find('button', {'id': 'content_download_btn'}):
-            download_url = re.search(
-                "download_iframe.attr\\('src', \"(.+)\"\\);",
-                c_response.text
-            )[1]
-            return download_url, ''
-
-        print(f'Unexpected page: {rid}')
-        return 'Error', None
-    # end common func
-
-    # Material related functions
-    def __material_extractor(
-        self, access_token: str, course_id: int, executor: ThreadPoolExecutor
-    ):
-        response = requests.get(_join_url_token(
-            self.__MODULES_URL.format(course_id), access_token
-        ))
-        if response.status_code != 200:
-            return response.json()['errors'][0]['message']
-        works = [
-            (k, module['items_url'])
-            for k, module in enumerate(response.json())
-        ]
-
-        return executor.map(
-            self.__itemgetter, works, repeat(access_token)
-        )
-
-    def __itemgetter(self, work_info: tuple, access_token: str) -> list:
-        def canvas_api_getter(url: str) -> tuple:
-            response = requests.get(_join_url_token(url, access_token))
             if response.status_code != 200:
-                return (
-                    False, json.loads(
-                        response.text.rsplit(';', 1)[-1]
-                    )['errors'][0]['message']
-                )
+                raise RuntimeError(f'Request failed. ({response.status_code})')
 
-            return (True, response.json())
-
-        work_id, m_url = work_info
-        results = []
-
-        # Query an module item, gets resources list.
-        i_success, i_result = canvas_api_getter(m_url)
-        if not i_success:
-            return ((work_id, 'Error while querying item', i_result),)
-
-        # Query resources
-        for resource in i_result:
-            r_url = resource.get('url', '')
-            if not r_url:
-                continue
-
-            # Query resource information
-            r_success, r_result = canvas_api_getter(r_url)
-            if not r_success:
-                results.append((
-                    work_id, 'Error while querying resource', r_result
-                ))
-                continue
-
-            # Parse resource information
-            rtype, rid = (
-                r_result['external_tool_tag_attributes']['url']
-                .rsplit('/', 2)[1:]
+        def get_php_session_id(session: requests.Session) -> None:
+            response = session.post(
+                'https://lms1.knu.ac.kr/sso/business.php',
+                timeout=10
             )
-            if rtype != 'contents':
-                continue
+            if response.status_code != 200:
+                raise RuntimeError(f'Request failed. ({response.status_code})')
 
-            download_url, ext = self.__lcms_extractor(rid)
+        def get_login_info(session: requests.Session) -> dict[str, str]:
+            response = session.post(
+                'https://knusso.knu.ac.kr/login.html?agentId=311',
+                timeout=10
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f'Request failed. ({response.status_code})')
+            return parse_form(response.text, 'form-send')
 
-            results.append((
-                work_id, r_result['name'] + ext, download_url
+        def register_session(session: requests.Session, form_content: str) -> None:
+            response = session.post(
+                'https://lms1.knu.ac.kr/sso/checkauth.php',
+                data=form_content,
+                timeout=10
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f'Request failed. ({response.status_code})')
+
+        def get_login_data(session: requests.Session) -> tuple[dict[str, str], str]:
+            def decrypt_rsa(pem_key: str, msg: str) -> str:
+                key = RSA.import_key(pem_key)
+                cipher = PKCS1_v1_5.new(key, SHA256)
+                result = cipher.decrypt(b64decode(msg), None)
+                if result is None:
+                    raise RuntimeError('Failed to decode.')
+                return result
+
+            response = session.post(
+                'https://lms1.knu.ac.kr/sso/agentProc.php',
+                headers={
+                    'User-Agent': USER_AGENT,
+                    'Accept': 'text/html',
+                },
+                timeout=10
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f'Request failed. ({response.status_code})')
+
+            data = parse_form(response.text, 'login_form')
+
+            session_pass_match = re.search(
+                r'loginCryption\("(.+)", "-----BEGIN RSA PRIVATE KEY-----(.+)-----END RSA PRIVATE KEY-----"\)',
+                response.text
+            )
+            private_key = \
+                f'-----BEGIN RSA PRIVATE KEY-----\n{session_pass_match[2]}\n-----END RSA PRIVATE KEY-----'
+            decrypted = decrypt_rsa(private_key, session_pass_match[1])
+            data['pseudonym_session[password]'] = decrypted.decode('ascii')
+
+            return data, response.url
+
+        def do_login(session: requests.Session, form_content: dict[str, str], prev_url: str) -> None:
+            response = session.post(
+                'https://canvas.knu.ac.kr/login/canvas',
+                data=form_content,
+                headers={
+                    'User-Agent': USER_AGENT,
+                    'Accept': 'text/html',
+                    'Referer': prev_url,
+                },
+                timeout=10
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f'Request failed. ({response.status_code})')
+
+        with requests.Session() as session:
+            session.cookies.set_cookie(
+                Cookie(
+                    version=0,
+                    name='JSESSIONID',
+                    value=knu_session,
+                    port=None,
+                    port_specified=False,
+                    domain='knusso.knu.ac.kr',
+                    domain_specified=False,
+                    domain_initial_dot=False,
+                    path='/',
+                    path_specified=True,
+                    secure=True,
+                    expires=None,
+                    discard=True,
+                    comment=None,
+                    comment_url=None,
+                    rest={'HttpOnly': None},
+                    rfc2109=False
             ))
 
-        return results
-    # end material func
+            get_session_tokens(session)
+            get_php_session_id(session)
+            login_info = get_login_info(session)
+            register_session(session, login_info)
 
-    # Resource related functions
-    def __resource_extractor(
-        self, access_token: str, course_id: int, executor: ThreadPoolExecutor
-    ):
-        def worker(work_info: tuple) -> list:
-            work_id, rname, rid = work_info
-            results = []
+            login_data, last_url = get_login_data(session)
+            do_login(session, login_data, last_url)
 
-            download_url, ext = self.__lcms_extractor(rid)
-            results.append((work_id, rname + ext, download_url))
+            return {
+                'canvas_session': session.cookies[CANVAS_SESSION],
+                'learningx_session': session.cookies[LEARNINGX_SESSION]
+            }
 
-            return results
 
-        # Get LearningX api token
-        session = requests.Session()
-        response = session.get(
-            _join_url_token(
-                self.__EXTERNAL_TOOL_URL.format(course_id),
-                access_token, ('id=' + self.__RESOURCE_TOOL_ID,)
+class CanvasSubjectGetter(ThreadRunner):
+    __URL = f'{CANVAS_URL}/api/v1/courses?include=term'
+    __LINK_PATTERN = re.compile(r'<(.+?)>; rel="([a-z]+)"')
+
+    def runner(self, canvas_session: str) -> dict[str, list[tuple[str, str]]]:
+        next_page = self.__URL
+        last_page = ''
+        result: dict[str, list[tuple[str, str]]] = {}
+
+        while True:
+            response = requests.get(next_page, cookies={CANVAS_SESSION: canvas_session})
+            if response.status_code != 200:
+                raise RuntimeError(f'Request failed. (Body: {response.text})')
+
+            for subject in json.loads(response.text[response.text.find('['):]):
+                if 'term' not in subject:
+                    continue
+                semester = f'{subject['term']['name'].split('학기', 1)[0]}학기'
+                result.setdefault(semester, []).append((subject['name'], subject['id']))
+
+            if next_page == last_page:
+                break
+
+            links = {k: v for v, k in self.__LINK_PATTERN.findall(response.headers['link'])}
+            next_page = links.get('next', '')
+            last_page = links.get('last', '')
+
+        return result
+
+
+class CanvasFileInfoGetter(ThreadRunner):
+    __LEARNINGX_URL_BASE = f'{CANVAS_URL}/learningx/api/v1'
+    __LCMS_BASE_URL = 'https://lcms.knu.ac.kr'
+
+    __LEARNINGX_MODULE_URL =\
+        __LEARNINGX_URL_BASE + '/courses/{course_id}/modules?include_detail=true'
+    __UNIPLAYER_INFO_BASE =\
+        __LCMS_BASE_URL + '/viewer/ssplayer/uniplayer_support/content.php?content_id={content_id}'
+
+    __LEARNINGX_BOARD_LIST_URL =\
+        __LEARNINGX_URL_BASE + '/learningx_board/courses/{course_id}/boards'
+    __LEARNINGX_BOARD_POSTS_URL =\
+        __LEARNINGX_URL_BASE + '/learningx_board/courses/{course_id}/boards/{board_id}/posts?page={page_no}'
+    __LEARNINGX_BOARD_POST_URL =\
+        __LEARNINGX_URL_BASE + '/learningx_board/courses/{course_id}/boards/{board_id}/posts/{post_no}'
+
+
+    def runner(
+        self, canvas_session: str, learningx_session: str, course_id: int
+    ) -> tuple[LectureMaterial, ...]:
+        futures: list[Future] = []
+        with ThreadPoolExecutor(max(self._workers_count, 4)) as executor:
+            futures.append(executor.submit(
+                self.__list_module_materials, executor, learningx_session, course_id
+            ))
+            futures.append(executor.submit(
+                self.__list_board_materials, executor, learningx_session, course_id
+            ))
+            return tuple(chain.from_iterable(f.result() for f in futures))
+
+    def __list_module_materials(
+        self, executor: Executor, learningx_session: str, course_id: int
+    ) -> tuple[LectureMaterial, ...]:
+        def list_content_ids() -> list[int]:
+            # Get modules
+            response = requests.get(
+                self.__LEARNINGX_MODULE_URL.format(course_id=course_id),
+                headers={'Authorization': f'Bearer {learningx_session}'}
             )
-        )
-        # print(response.json()['url'])
-        response = session.get(response.json()['url'])
-        # print(response.text)
-        extracted_data = {
-            tag['name']: tag['value']
-            for tag in bs(response.text, 'html.parser').select('form input')
-        }
-        response = session.post(
-            'https://canvas.knu.ac.kr/learningx/lti/courseresource',
-            data=extracted_data
-        )
-        # print(json.dumps(extracted_data, indent=4, ensure_ascii=False))
-        # print(
-        #     session.cookies.get('xn_api_token', None),
-        #     session.cookies, sep='\n'
-        # )
-        session.headers.update({
-            'Authorization': f"Bearer {session.cookies['xn_api_token']}"
-        })
-        # end token
-        response = session.get(
-            self.__RESOURCE_DB_URL.format(course_id),
-        )
-        works = [
-            (k, resource['title'], resource['commons_content']['content_id'])
-            for k, resource in enumerate(response.json())
-        ]
+            if response.status_code != 200:
+                raise RuntimeError(f'Request Failed (Code: {response.status_code})')
 
-        return executor.map(worker, works)
-    # end resource func
+            # Extract module items
+            return [
+                content_id
+                for module in response.json() for item in module['module_items']
+                if (content_data := item.get('content_data', {})).get('opened', False)
+                and (content_id := content_data.get('item_content_data', {}).get('content_id', None))
+            ]
+
+        def get_content_info(content_id: str) -> LectureMaterial:
+            assert content_id.isascii()
+
+            response = requests.get(self.__UNIPLAYER_INFO_BASE.format(content_id=content_id))
+            if response.status_code != 200:
+                raise RuntimeError(f'Request Failed. {response.status_code}')
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=XMLParsedAsHTMLWarning)
+                parser = BeautifulSoup(response.text, 'html.parser')
+
+            try:
+                content_type = parser.select_one('content > content_playing_info > content_type').get_text(strip=True)
+                match (content_type):
+                    case 'sharedocs':
+                        url_base = html_unescape(urllib.parse.unquote(
+                            parser.select_one('content > content_playing_info > content_download_uri').get_text(strip=True)
+                        ))
+                        content_url = self.__LCMS_BASE_URL + url_base
+                        material_type = MaterialTypes.DOCUMENT
+                    case 'upf':
+                        file_name = parser.select_one('story_list > story > main_media_list > main_media').get_text(strip=True)
+                        url_base = parser.select_one('service_root > media > media_uri[target=all]').get_text(strip=True)
+                        content_url = url_base.replace('[MEDIA_FILE]', file_name)
+                        material_type = MaterialTypes.VIDEO
+                    case 'video1':
+                        content_url = parser.select_one('main_media > desktop > html5 > media_uri').get_text(strip=True)
+                        material_type = MaterialTypes.VIDEO
+                    case _:
+                        raise ValueError(f'Unsupported content type: {content_type}')
+
+                content_name_base = parser.select_one('content_metadata > title').get_text(strip=True)
+                content_name = re.search(r'(<!\[CDATA\[)?(.+)(\]\]>)?', content_name_base)[2]
+            except Exception as e:
+                with open('parse_failed.xml', 'w', encoding='utf-8') as file:
+                    file.write(response.text)
+                raise e
+
+            return LectureMaterial(
+                content_name + os.path.splitext(content_url)[1],
+                material_type,
+                content_url
+            )
+
+        return tuple(executor.map(get_content_info, list_content_ids()))
+
+    def __list_board_materials(
+        self, executor: Executor, learningx_session: str, course_id: int
+    ) -> tuple[LectureMaterial, ...]:
+        class Post(NamedTuple):
+            id: str
+            title: str
+
+        class PageInfo(NamedTuple):
+            items: list[Post]
+            total_pages: int
+            item_per_page: int
+
+        def find_material_board_id() -> int:
+            response = requests.get(
+                self.__LEARNINGX_BOARD_LIST_URL.format(course_id=course_id),
+                headers={'Authorization': f'Bearer {learningx_session}'}
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f'Request Failed (Code: {response.status_code})')
+            for subject in response.json():
+                if subject['title'] == '강의자료실':
+                    return subject['id']
+
+        def list_page(board_id: int, page: int) -> PageInfo:
+            response = requests.get(
+                self.__LEARNINGX_BOARD_POSTS_URL.format(
+                    course_id=course_id, board_id=board_id, page_no=page
+                ), headers={'Authorization': f'Bearer {learningx_session}'}
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f'Request Failed (Code: {response.status_code})')
+            response_json = response.json()
+            return PageInfo(
+                [Post(post['id'], post['title']) for post in response_json['items']],
+                response_json['pagination']['last_page'], response_json['pagination']['per_page']
+            )
+
+        def post_to_material_urls(post_id: str) -> list[LectureMaterial]:
+            response = requests.get(
+                self.__LEARNINGX_BOARD_POST_URL.format(
+                    course_id=course_id, board_id=board_id, post_no=post_id
+                ), headers={'Authorization': f'Bearer {learningx_session}'}
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f'Request Failed (Code: {response.status_code})')
+            response_json = response.json()
+            return [
+                LectureMaterial(attachment['filename'], MaterialTypes.DOCUMENT, attachment['url'])
+                for attachment in response_json['attachments']
+            ]
+
+        board_id = find_material_board_id()
+        first_page = list_page(board_id, 1)
+        pages = [first_page, *executor.map(list_page, repeat(board_id), range(2, first_page.total_pages + 1))]
+        items = [item.id for page in pages for item in page.items]
+        return tuple(chain.from_iterable(executor.map(post_to_material_urls, items)))
