@@ -177,15 +177,16 @@ class CanvasLoginWorker(ThreadRunner):
 
 
 class CanvasSubjectGetter(ThreadRunner):
-    __URL = f'{CANVAS_URL}/api/v1/courses?include=term'
+    __URL = f'{CANVAS_URL}/api/v1/courses?include=term&per_page=50'
     __LINK_PATTERN = re.compile(r'<(.+?)>; rel="([a-z]+)"')
+    __SEMESTER_PATTERN = re.compile(r'20\d{2}년 (1|2|(여름|겨울)(계절)?)학기')
 
     def runner(self, canvas_session: str) -> dict[str, list[tuple[str, str]]]:
         next_page = self.__URL
         last_page = ''
         result: dict[str, list[tuple[str, str]]] = {}
 
-        while True:
+        while next_page:
             response = requests.get(next_page, cookies={CANVAS_SESSION: canvas_session})
             if response.status_code != 200:
                 raise RuntimeError(f'Request failed. (Body: {response.text})')
@@ -194,7 +195,8 @@ class CanvasSubjectGetter(ThreadRunner):
                 if 'term' not in subject:
                     continue
                 semester = f'{subject['term']['name'].split('학기', 1)[0]}학기'
-                result.setdefault(semester, []).append((subject['name'], subject['id']))
+                if self.__SEMESTER_PATTERN.fullmatch(semester):
+                    result.setdefault(semester, []).append((subject['name'], subject['id']))
 
             if next_page == last_page:
                 break
@@ -222,6 +224,8 @@ class CanvasFileInfoGetter(ThreadRunner):
     __LEARNINGX_BOARD_POST_URL =\
         __LEARNINGX_URL_BASE + '/learningx_board/courses/{course_id}/boards/{board_id}/posts/{post_no}'
 
+    __LEARNINGX_MODULE_ITEM_CONTENT_ID_PATTERN = re.compile('[0-9a-z]{13}')
+
 
     def runner(
         self, canvas_session: str, learningx_session: str, course_id: int
@@ -239,7 +243,7 @@ class CanvasFileInfoGetter(ThreadRunner):
     def __list_module_materials(
         self, executor: Executor, learningx_session: str, course_id: int
     ) -> tuple[LectureMaterial, ...]:
-        def list_content_ids() -> list[int]:
+        def list_content_ids() -> list[str]:
             # Get modules
             response = requests.get(
                 self.__LEARNINGX_MODULE_URL.format(course_id=course_id),
@@ -250,13 +254,26 @@ class CanvasFileInfoGetter(ThreadRunner):
 
             # Extract module items
             return [
-                content_id
-                for module in response.json() for item in module['module_items']
-                if (content_data := item.get('content_data', {})).get('opened', False)
-                and (content_id := content_data.get('item_content_data', {}).get('content_id', None))
+                (content_id_stripped, content_type.strip())
+                for module in response.json() for items in module['module_items']
+                if isinstance(items, dict)
+                and isinstance(content_data := items.get('content_data', {}), dict)
+                and content_data.get('opened', False)
+                and isinstance(item_content_data := content_data.get('item_content_data', {}), dict)
+                and isinstance(content_id := item_content_data.get('content_id', None), str)
+                and self.__LEARNINGX_MODULE_ITEM_CONTENT_ID_PATTERN.fullmatch(content_id_stripped := content_id.strip())
+                and isinstance(content_type := item_content_data.get('content_type', None), str)
             ]
 
-        def get_content_info(content_id: str) -> LectureMaterial:
+        def get_content_material(content_info: tuple[str, str]) -> LectureMaterial:
+            content_id, content_type = content_info
+            match (content_type):
+                case 'pdf' | 'everlec':
+                    return get_uniplayer_content_material(content_id)
+                case _:
+                    return None
+
+        def get_uniplayer_content_material(content_id: str) -> LectureMaterial:
             assert content_id.isascii()
 
             response = requests.get(self.__UNIPLAYER_INFO_BASE.format(content_id=content_id))
@@ -300,7 +317,7 @@ class CanvasFileInfoGetter(ThreadRunner):
                 content_url
             )
 
-        return tuple(executor.map(get_content_info, list_content_ids()))
+        return tuple(filter(None, executor.map(get_content_material, list_content_ids())))
 
     def __list_board_materials(
         self, executor: Executor, learningx_session: str, course_id: int
