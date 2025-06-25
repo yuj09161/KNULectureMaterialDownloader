@@ -19,18 +19,19 @@ def run_main():
             PROGRAM_DIR + 'launch.json', 'r', encoding='utf-8'
         ) as file:
             config = json.load(file)
+    app_name = config['name']
     splash_text = config['splash']
     if splash_text:
         pre_main_name = config['pre_main']
         if pre_main_name:
             pyside6_splash_main(
                 config['main_module'], config['main_func'],
-                splash_text, pre_main_name
+                app_name, splash_text, pre_main_name
             )
         else:
             pyside6_splash_main(
                 config['main_module'], config['main_func'],
-                splash_text
+                app_name, splash_text
             )
     else:
         main(config['main_module'], config['main_func'])

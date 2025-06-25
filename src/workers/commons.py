@@ -10,7 +10,8 @@ from pyside_commons import ThreadRunner, ExceptionBridge
 from . import MaterialTypes
 
 
-CHUNK_SIZE = 32 * (1 << 20)
+CHUNK_SIZE = 4 * 1024 ** 2  # 4MiB
+FILE_WRITE_SIZE = 32 * 1024 ** 2  # 32MiB
 
 
 HEADER_BY_TYPE = {
@@ -51,35 +52,41 @@ class FileDownloader(ThreadRunner):
 
         def download_file(name: str, type: MaterialTypes, url: str, result_callback: Callable[[str], Any]):
             response = requests.get(url, headers=HEADER_BY_TYPE[type])
-            if response.status_code == 200:
-                with open(f'{destination_dir}/{name}', 'wb') as file:
-                    file.write(response.content)
-                result_callback('성공')
-                return True, '성공'
-            elif response.status_code == 206:
-                target = f'{destination_dir}/{name}'
-                destination = f'{target}.part'
-                with open(destination, 'wb') as file:
-                    file.write(response.content)
-                with open(destination, 'ab') as file:
-                    while True:
-                        range_ = extract_range_from_body(response.headers)
-                        if (range_.end >= range_.total_length - 1):
-                            break
-                        result_callback(f'{round(range_.end / range_.total_length * 100, 1)}%')
-                        response = requests.get(url, headers=HEADER_BY_TYPE[type] | {'Range': f'bytes={range_.end + 1}-{range_.end + CHUNK_SIZE + 1}'})
-                        if response.status_code != 206:
-                            ExceptionBridge().warning('다운로드 실패', f'파일 다운로드 실패\n이름: {name}\n응답 Code: {response.status_code}')
-                            result_callback(f'실패 (Code: {response.status_code})')
-                            return False, f'실패 (Code: {response.status_code})'
+            match response.status_code:
+                case 200:
+                    with open(f'{destination_dir}/{name}', 'wb') as file:
                         file.write(response.content)
-                os.rename(destination, target)
-                result_callback('성공')
-                return True, '성공'
-            else:
-                ExceptionBridge().warning('다운로드 실패', f'파일 다운로드 실패\n이름: {name}\n응답 Code: {response.status_code}')
-                result_callback(f'실패 (Code: {response.status_code})')
-                return False, f'실패 (Code: {response.status_code})'
+                    result_callback('성공')
+                    return True, '성공'
+                case 206:
+                    buf = bytearray()
+                    target = f'{destination_dir}/{name}'
+                    destination = f'{target}.part'
+                    with open(destination, 'wb') as file:
+                        buf += response.content
+                    with open(destination, 'ab') as file:
+                        while True:
+                            if len(buf) >= FILE_WRITE_SIZE:
+                                file.write(buf)
+                                buf.clear()
+                            range_ = extract_range_from_body(response.headers)
+                            if (range_.end >= range_.total_length - 1):
+                                file.write(buf)
+                                break
+                            result_callback(f'{round(range_.end / range_.total_length * 100, 1)}%')
+                            response = requests.get(url, headers=HEADER_BY_TYPE[type] | {'Range': f'bytes={range_.end + 1}-{range_.end + CHUNK_SIZE + 1}'})
+                            if response.status_code != 206:
+                                ExceptionBridge().warning('다운로드 실패', f'파일 다운로드 실패\n이름: {name}\n응답 Code: {response.status_code}')
+                                result_callback(f'실패 (Code: {response.status_code})')
+                                return False, f'실패 (Code: {response.status_code})'
+                            buf += response.content
+                    os.rename(destination, target)
+                    result_callback('성공')
+                    return True, '성공'
+                case _:
+                    ExceptionBridge().warning('다운로드 실패', f'파일 다운로드 실패\n이름: {name}\n응답 Code: {response.status_code}')
+                    result_callback(f'실패 (Code: {response.status_code})')
+                    return False, f'실패 (Code: {response.status_code})'
 
         with ThreadPoolExecutor(max(self._workers_count, 4)) as executor:
             return tuple(executor.map(download_file, *zip(*selected_files)))

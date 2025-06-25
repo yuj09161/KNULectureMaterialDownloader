@@ -1,6 +1,7 @@
 {
     "main_module": "main",
     "main_func": "main",
+    "name": "LMS 강의자료 다운로더",
     "splash": "강의자료\nDownloader",
     "pre_main": null
 }

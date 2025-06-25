@@ -171,6 +171,7 @@ class CanvasLoginWorker(ThreadRunner):
             do_login(session, login_data, last_url)
 
             return {
+                'knu_session': knu_session,
                 'canvas_session': session.cookies[CANVAS_SESSION],
                 'learningx_session': session.cookies[LEARNINGX_SESSION]
             }
@@ -267,11 +268,10 @@ class CanvasFileInfoGetter(ThreadRunner):
 
         def get_content_material(content_info: tuple[str, str]) -> LectureMaterial:
             content_id, content_type = content_info
-            match (content_type):
-                case 'pdf' | 'everlec':
-                    return get_uniplayer_content_material(content_id)
-                case _:
-                    return None
+            try:
+                return get_uniplayer_content_material(content_id)
+            except:
+                return None
 
         def get_uniplayer_content_material(content_id: str) -> LectureMaterial:
             assert content_id.isascii()
@@ -307,8 +307,9 @@ class CanvasFileInfoGetter(ThreadRunner):
                 content_name_base = parser.select_one('content_metadata > title').get_text(strip=True)
                 content_name = re.search(r'(<!\[CDATA\[)?(.+)(\]\]>)?', content_name_base)[2]
             except Exception as e:
-                with open('parse_failed.xml', 'w', encoding='utf-8') as file:
+                with open('parse_failed.xml', 'a', encoding='utf-8') as file:
                     file.write(response.text)
+                    file.write('\n\n-----\n\n')
                 raise e
 
             return LectureMaterial(

@@ -281,6 +281,7 @@ def _check_imports() -> bool:
 def pyside6_splash_main(
     main_module_name: str,
     main_func_name: str,
+    app_name: str,
     splash_text: str,
     pre_main_name: str = ''
 ):
@@ -321,6 +322,7 @@ def pyside6_splash_main(
         # Create Qt application & Show splash
         app = QApplication()
         app.setWindowIcon(QIcon(PROGRAM_DIR + 'logo.png'))
+        app.setApplicationDisplayName(app_name)
 
         splash = _Splash(app, splash_text)
         splash.show()
@@ -329,6 +331,7 @@ def pyside6_splash_main(
         # Create Qt application & Show splash
         app = QApplication()
         app.setWindowIcon(QIcon(PROGRAM_DIR + 'logo.png'))
+        app.setApplicationDisplayName(app_name)
 
         splash = _Splash(app, splash_text)
         splash.show()
